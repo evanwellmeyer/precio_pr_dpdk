@@ -16,8 +16,6 @@ from torch.utils.data import Dataset, DataLoader
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from sklearn.model_selection import train_test_split
 
-from models.unet import Unet6R_1x
-
 # --------------------------
 # Device
 # --------------------------
@@ -28,10 +26,10 @@ print(f"Using device: {device} | AMP: {use_amp}")
 # --------------------------
 # Config
 # --------------------------
-ensemble_size = 5
+ensemble_size = 10
 base_seed     = 42
-base_ch       = 128
-gn_groups     = 8
+base_ch       = 8
+gn_groups     = 1
 k_size        = 3
 pdrop         = 0.0
 num_bins      = 64
@@ -39,12 +37,12 @@ sigma_scale   = 0.6
 batch_train   = 40
 batch_val     = 40
 num_epochs    = 5000
-patience      = 3
+patience      = 20
 grad_clip     = 1.0
 
 # target bin range (physical target space; will be normalized using HadGEM train stats)
-dP_min   = -750
-dP_max   =  1250
+dP_min   = -700
+dP_max   =  1200
 
 random.seed(base_seed); np.random.seed(base_seed); torch.manual_seed(base_seed)
 
@@ -52,7 +50,7 @@ random.seed(base_seed); np.random.seed(base_seed); torch.manual_seed(base_seed)
 # Paths
 # --------------------------
 base_model_name = (
-    f"ens_HG789_PR-dPdK_Softmax_unet6SR_1x_ch{base_ch}_k{k_size}_"
+    f"ens_HG789_PR_dPdK_Softmax_unet6R_ch{base_ch}_k{k_size}_"
     f"128x_dPbins{num_bins}_gn{gn_groups}_dpmin{dP_min}_dPmax{dP_max}"
 )
 weights_dir  = "/Users/ewellmeyer/Documents/research/weights"
@@ -80,6 +78,188 @@ class ClimateDataset(torch.utils.data.Dataset):
 # --------------------------
 # Model
 # --------------------------
+
+class CustomPad(nn.Module):
+    def __init__(self, pad_height, pad_width):
+        """
+        Pads the input tensor with reflect padding for the height dimension
+        and circular padding for the width dimension.
+        """
+        super(CustomPad, self).__init__()
+        self.pad_height = pad_height
+        self.pad_width = pad_width
+
+    def forward(self, x):
+        x = F.pad(x, (0, 0, self.pad_height, self.pad_height), mode='reflect')
+        x = F.pad(x, (self.pad_width, self.pad_width, 0, 0), mode='circular')
+        return x
+    
+class ConvResBlockSingle(nn.Module):
+    """
+    A simplified residual block with only one convolutional layer.
+    This version is computationally faster but may have less representational power
+    than a block with two convolutional layers.
+    """
+    def __init__(self, in_ch, out_ch, k_size=3, p_drop=0.0, gn_groups: int = 1):  
+        super().__init__()
+        pad = (k_size - 1) // 2
+        self.pad = CustomPad(pad, pad)
+
+        # A single convolution layer
+        self.conv1 = nn.Conv2d(in_ch, out_ch, k_size, padding=0)
+
+        # Normalization for the single convolution layer
+        self.gn1 = nn.GroupNorm(num_groups=gn_groups, num_channels=out_ch)  # <- use gn_groups
+        # self.gn1 = nn.GroupNorm(num_groups=out_ch, num_channels=out_ch)
+
+        self.act = nn.Mish(inplace=True)
+        self.dp = nn.Dropout2d(p_drop) if p_drop else nn.Identity()
+        
+        # Skip connection to match input and output channels for the residual addition
+        self.skip = nn.Conv2d(in_ch, out_ch, 1) if in_ch != out_ch else nn.Identity()
+
+    def forward(self, x):
+        """
+        Defines the forward pass.
+        The path is now: CONV -> NORM -> ACT -> DROPOUT
+        """
+        # Main path with a single convolutional step
+        y = self.act(self.gn1(self.conv1(self.pad(x))))
+        y = self.dp(y)
+        
+        # Add the skip connection (input) to the output of the main path
+        return self.act(y + self.skip(x))
+
+class Unet6R(nn.Module):
+    """
+    A U-Net architecture with 6 levels of encoding and decoding.
+    The architecture is designed to handle input sizes where
+    the dimensions are not necessarily divisible by 2^6 = 64
+    by automatically padding and cropping internally.
+    """
+    def __init__(
+        self,
+        input_channels: int = 1,
+        output_channels: int = 1,
+        base_channels: int = 32,
+        kernel_size: int = 3,
+        p_drop: float = 0.1,
+        gn_groups: int = 1,
+    ):
+        super().__init__()
+        k = kernel_size
+        c1, c2, c4, c8, c16, c32, c64 = (
+            base_channels,
+            base_channels * 2,
+            base_channels * 4,
+            base_channels * 8,
+            base_channels * 16,
+            base_channels * 32,
+            base_channels * 64,
+        )
+
+        # ---- Encoder ----
+        self.enc1 = ConvResBlockSingle(input_channels, c1, k_size=k, p_drop=p_drop)
+        self.pool1 = nn.MaxPool2d(2)
+
+        self.enc2 = ConvResBlockSingle(c1, c2, k_size=k, p_drop=p_drop)
+        self.pool2 = nn.MaxPool2d(2)
+
+        self.enc3 = ConvResBlockSingle(c2, c4, k_size=k, p_drop=p_drop)
+        self.pool3 = nn.MaxPool2d(2)
+
+        self.enc4 = ConvResBlockSingle(c4, c8, k_size=k, p_drop=p_drop)
+        self.pool4 = nn.MaxPool2d(2)
+
+        self.enc5 = ConvResBlockSingle(c8, c16, k_size=k, p_drop=p_drop)
+        self.pool5 = nn.MaxPool2d(2)
+        
+        self.enc6 = ConvResBlockSingle(c16, c32, k_size=k, p_drop=p_drop)
+        self.pool6 = nn.MaxPool2d(2)
+
+        # ---- Bottleneck ----
+        self.bottleneck = ConvResBlockSingle(c32, c64, k_size=k, p_drop=p_drop)
+
+        # ---- Decoder ----
+        self.upconv1 = nn.ConvTranspose2d(c64, c32, kernel_size=2, stride=2)
+        self.dec1 = ConvResBlockSingle(c32 + c32, c32, k_size=k, p_drop=p_drop)
+
+        self.upconv2 = nn.ConvTranspose2d(c32, c16, kernel_size=2, stride=2)
+        self.dec2 = ConvResBlockSingle(c16 + c16, c16, k_size=k, p_drop=p_drop)
+
+        self.upconv3 = nn.ConvTranspose2d(c16, c8, kernel_size=2, stride=2)
+        self.dec3 = ConvResBlockSingle(c8 + c8, c8, k_size=k, p_drop=p_drop)
+
+        self.upconv4 = nn.ConvTranspose2d(c8, c4, kernel_size=2, stride=2)
+        self.dec4 = ConvResBlockSingle(c4 + c4, c4, k_size=k, p_drop=p_drop)
+
+        self.upconv5 = nn.ConvTranspose2d(c4, c2, kernel_size=2, stride=2)
+        self.dec5 = ConvResBlockSingle(c2 + c2, c2, k_size=k, p_drop=p_drop)
+        
+        self.upconv6 = nn.ConvTranspose2d(c2, c1, kernel_size=2, stride=2)
+        self.dec6 = ConvResBlockSingle(c1 + c1, c1, k_size=k, p_drop=p_drop)
+
+        # ---- Head ----
+        self.final_conv = nn.Conv2d(c1, output_channels, kernel_size=1)
+
+    def forward(self, x):
+        # Store original size for final cropping
+        original_h, original_w = x.shape[2], x.shape[3]
+
+        # Calculate padding to make dimensions divisible by 2^6 = 64
+        if original_h % 64 == 0 and original_w % 64 == 0:
+            pad_h, pad_w = 0, 0
+        else:
+            pad_h = (64 - original_h % 64) % 64
+            pad_w = (64 - original_w % 64) % 64
+
+        # Pad the input tensor if necessary. The format is (left, right, top, bottom).
+        if pad_h > 0 or pad_w > 0:
+            x_padded = F.pad(x, (pad_w // 2, pad_w - pad_w // 2, pad_h // 2, pad_h - pad_h // 2), mode='reflect')
+        else:
+            x_padded = x
+
+        # Encoder Path using padded input
+        x1 = self.enc1(x_padded)
+        x1p = self.pool1(x1)
+        x2 = self.enc2(x1p)
+        x2p = self.pool2(x2)
+        x3 = self.enc3(x2p)
+        x3p = self.pool3(x3)
+        x4 = self.enc4(x3p)
+        x4p = self.pool4(x4)
+        x5 = self.enc5(x4p)
+        x5p = self.pool5(x5)
+        x6 = self.enc6(x5p)
+        x6p = self.pool6(x6)
+
+        # Bottleneck
+        b = self.bottleneck(x6p)
+
+        # Decoder Path
+        u1 = self.upconv1(b)
+        d1 = self.dec1(torch.cat([u1, x6], dim=1))
+        u2 = self.upconv2(d1)
+        d2 = self.dec2(torch.cat([u2, x5], dim=1))
+        u3 = self.upconv3(d2)
+        d3 = self.dec3(torch.cat([u3, x4], dim=1))
+        u4 = self.upconv4(d3)
+        d4 = self.dec4(torch.cat([u4, x3], dim=1))
+        u5 = self.upconv5(d4)
+        d5 = self.dec5(torch.cat([u5, x2], dim=1))
+        u6 = self.upconv6(d5)
+        d6 = self.dec6(torch.cat([u6, x1], dim=1))
+
+        output_padded = self.final_conv(d6)
+
+        # Crop the output back to the original size if padding was added
+        if pad_h > 0 or pad_w > 0:
+            final_output = output_padded[:, :, pad_h // 2 : original_h + pad_h // 2, pad_w // 2 : original_w + pad_w // 2]
+        else:
+            final_output = output_padded
+
+        return final_output
+
 class SoftmaxHead(nn.Module):
     def __init__(self, in_channels, num_bins):
         super().__init__()
@@ -92,7 +272,7 @@ class SoftmaxHead(nn.Module):
 class ProbUNet(nn.Module):
     def __init__(self, input_channels, base_channels, kernel_size, p_drop, num_bins, gn_groups: int = 1):
         super().__init__()
-        self.backbone = Unet6R_1x(
+        self.backbone = Unet6R(
             input_channels=input_channels,
             output_channels=base_channels,
             base_channels=base_channels,
