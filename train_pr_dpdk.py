@@ -20,7 +20,7 @@ from sklearn.model_selection import train_test_split
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
 
-from precip_pr_dpdk.prob_unet import ProbUNet
+from precip_pr_dpdk.unet import ProbUNet
 
 
 device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
@@ -36,7 +36,7 @@ k_size = 3
 pdrop = 0.0
 num_bins = 64
 sigma_scale = 0.6
-batch_train = 500
+batch_train = 200
 batch_val = 100
 num_epochs = 5000
 patience = 20
@@ -185,7 +185,7 @@ for member in range(ensemble_size):
     random.seed(base_seed + member)
 
     model = ProbUNet(1, base_ch, k_size, pdrop, num_bins, gn_groups=gn_groups).to(device)
-    opt = optim.RAdam(model.parameters(), lr=1e-2)
+    opt = optim.Adam(model.parameters(), lr=1e-2)
     sch = ReduceLROnPlateau(opt, mode="min", factor=0.5, patience=10)
 
     best_val = float("inf")

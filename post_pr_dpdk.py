@@ -16,7 +16,7 @@ import numpy as np
 import torch
 import xarray as xr
 
-from precip_pr_dpdk.prob_unet import ProbUNet
+from precip_pr_dpdk.unet import ProbUNet
 
 
 base_channels = 8
