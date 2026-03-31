@@ -20,11 +20,11 @@ from sklearn.model_selection import train_test_split
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
 
-from precip_pr_dpdk.unet import ProbUNet
+from unet import ProbUNet
 
 
 device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-use_amp = torch.backends.mps.is_available()
+use_amp = False #torch.backends.mps.is_available()
 print(f"Using device: {device} | AMP: {use_amp}")
 
 
@@ -85,7 +85,7 @@ def make_soft_labels(y_norm, bin_centers_norm, sigma_bins_norm):
 
 
 def nll_from_probs(probs, y_soft):
-    return -(y_soft * probs.clamp_min(1e-12).log()).sum(dim=1).mean()
+    return -(y_soft * probs.clamp_min(1e-6).log()).sum(dim=1).mean()
 
 
 print("Loading HadGEM data...")
@@ -185,7 +185,7 @@ for member in range(ensemble_size):
     random.seed(base_seed + member)
 
     model = ProbUNet(1, base_ch, k_size, pdrop, num_bins, gn_groups=gn_groups).to(device)
-    opt = optim.Adam(model.parameters(), lr=1e-2)
+    opt = optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-5)
     sch = ReduceLROnPlateau(opt, mode="min", factor=0.5, patience=10)
 
     best_val = float("inf")
