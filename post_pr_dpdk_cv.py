@@ -27,7 +27,7 @@ gn_groups  = 1
 k_size     = 3
 num_bins   = 64
 lat_dim    = 128
-batch_size = 64
+batch_size = 100
 outlier_iqr_factor = 3.0
 
 dP_min = -700

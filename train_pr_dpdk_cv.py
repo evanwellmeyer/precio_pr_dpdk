@@ -31,7 +31,7 @@ use_amp = False
 print(f"Using device: {device} | AMP: {use_amp}")
 
 
-ensemble_size = 10
+ensemble_size = 5
 base_seed     = 42
 base_ch       = 8
 gn_groups     = 1
