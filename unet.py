@@ -44,45 +44,37 @@ class Unet6R(nn.Module):
     ):
         super().__init__()
         k = kernel_size
-        c1, c2, c4, c8, c16, c32, c64 = (
-            base_channels,
-            base_channels * 2,
-            base_channels * 4,
-            base_channels * 8,
-            base_channels * 16,
-            base_channels * 32,
-            base_channels * 64,
-        )
+        c = base_channels
 
-        self.enc1 = ConvResBlockSingle(input_channels, c1, k_size=k, p_drop=p_drop, gn_groups=gn_groups)
+        self.enc1 = ConvResBlockSingle(input_channels, c, k_size=k, p_drop=p_drop, gn_groups=gn_groups)
         self.pool1 = nn.MaxPool2d(2)
-        self.enc2 = ConvResBlockSingle(c1, c2, k_size=k, p_drop=p_drop, gn_groups=gn_groups)
+        self.enc2 = ConvResBlockSingle(c, c, k_size=k, p_drop=p_drop, gn_groups=gn_groups)
         self.pool2 = nn.MaxPool2d(2)
-        self.enc3 = ConvResBlockSingle(c2, c4, k_size=k, p_drop=p_drop, gn_groups=gn_groups)
+        self.enc3 = ConvResBlockSingle(c, c, k_size=k, p_drop=p_drop, gn_groups=gn_groups)
         self.pool3 = nn.MaxPool2d(2)
-        self.enc4 = ConvResBlockSingle(c4, c8, k_size=k, p_drop=p_drop, gn_groups=gn_groups)
+        self.enc4 = ConvResBlockSingle(c, c, k_size=k, p_drop=p_drop, gn_groups=gn_groups)
         self.pool4 = nn.MaxPool2d(2)
-        self.enc5 = ConvResBlockSingle(c8, c16, k_size=k, p_drop=p_drop, gn_groups=gn_groups)
+        self.enc5 = ConvResBlockSingle(c, c, k_size=k, p_drop=p_drop, gn_groups=gn_groups)
         self.pool5 = nn.MaxPool2d(2)
-        self.enc6 = ConvResBlockSingle(c16, c32, k_size=k, p_drop=p_drop, gn_groups=gn_groups)
+        self.enc6 = ConvResBlockSingle(c, c, k_size=k, p_drop=p_drop, gn_groups=gn_groups)
         self.pool6 = nn.MaxPool2d(2)
 
-        self.bottleneck = ConvResBlockSingle(c32, c64, k_size=k, p_drop=p_drop, gn_groups=gn_groups)
+        self.bottleneck = ConvResBlockSingle(c, c, k_size=k, p_drop=p_drop, gn_groups=gn_groups)
 
-        self.upconv1 = nn.ConvTranspose2d(c64, c32, kernel_size=2, stride=2)
-        self.dec1 = ConvResBlockSingle(c32 + c32, c32, k_size=k, p_drop=p_drop, gn_groups=gn_groups)
-        self.upconv2 = nn.ConvTranspose2d(c32, c16, kernel_size=2, stride=2)
-        self.dec2 = ConvResBlockSingle(c16 + c16, c16, k_size=k, p_drop=p_drop, gn_groups=gn_groups)
-        self.upconv3 = nn.ConvTranspose2d(c16, c8, kernel_size=2, stride=2)
-        self.dec3 = ConvResBlockSingle(c8 + c8, c8, k_size=k, p_drop=p_drop, gn_groups=gn_groups)
-        self.upconv4 = nn.ConvTranspose2d(c8, c4, kernel_size=2, stride=2)
-        self.dec4 = ConvResBlockSingle(c4 + c4, c4, k_size=k, p_drop=p_drop, gn_groups=gn_groups)
-        self.upconv5 = nn.ConvTranspose2d(c4, c2, kernel_size=2, stride=2)
-        self.dec5 = ConvResBlockSingle(c2 + c2, c2, k_size=k, p_drop=p_drop, gn_groups=gn_groups)
-        self.upconv6 = nn.ConvTranspose2d(c2, c1, kernel_size=2, stride=2)
-        self.dec6 = ConvResBlockSingle(c1 + c1, c1, k_size=k, p_drop=p_drop, gn_groups=gn_groups)
+        self.upconv1 = nn.ConvTranspose2d(c, c, kernel_size=2, stride=2)
+        self.dec1 = ConvResBlockSingle(c + c, c, k_size=k, p_drop=p_drop, gn_groups=gn_groups)
+        self.upconv2 = nn.ConvTranspose2d(c, c, kernel_size=2, stride=2)
+        self.dec2 = ConvResBlockSingle(c + c, c, k_size=k, p_drop=p_drop, gn_groups=gn_groups)
+        self.upconv3 = nn.ConvTranspose2d(c, c, kernel_size=2, stride=2)
+        self.dec3 = ConvResBlockSingle(c + c, c, k_size=k, p_drop=p_drop, gn_groups=gn_groups)
+        self.upconv4 = nn.ConvTranspose2d(c, c, kernel_size=2, stride=2)
+        self.dec4 = ConvResBlockSingle(c + c, c, k_size=k, p_drop=p_drop, gn_groups=gn_groups)
+        self.upconv5 = nn.ConvTranspose2d(c, c, kernel_size=2, stride=2)
+        self.dec5 = ConvResBlockSingle(c + c, c, k_size=k, p_drop=p_drop, gn_groups=gn_groups)
+        self.upconv6 = nn.ConvTranspose2d(c, c, kernel_size=2, stride=2)
+        self.dec6 = ConvResBlockSingle(c + c, c, k_size=k, p_drop=p_drop, gn_groups=gn_groups)
 
-        self.final_conv = nn.Conv2d(c1, output_channels, kernel_size=1)
+        self.final_conv = nn.Conv2d(c, output_channels, kernel_size=1)
 
     def forward(self, x):
         original_h, original_w = x.shape[2], x.shape[3]
