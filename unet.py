@@ -126,6 +126,8 @@ class SoftmaxHead(nn.Module):
     def __init__(self, in_channels, num_bins):
         super().__init__()
         self.conv = nn.Conv2d(in_channels, num_bins, kernel_size=1)
+        nn.init.normal_(self.conv.weight, std=0.01)
+        nn.init.zeros_(self.conv.bias)
 
     def forward(self, feat):
         logits = self.conv(feat)
