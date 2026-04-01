@@ -30,14 +30,14 @@ print(f"Using device: {device} | AMP: {use_amp}")
 
 ensemble_size = 10
 base_seed = 42
-base_ch = 8
+base_ch = 32
 gn_groups = 1
 k_size = 3
 pdrop = 0.0
 num_bins = 64
 sigma_scale = 0.6
-batch_train = 200
-batch_val = 100
+batch_train = 80
+batch_val = 60
 num_epochs = 5000
 patience = 20
 grad_clip = 1.0
@@ -174,7 +174,7 @@ del Ytr, Yva_hg
 gc.collect()
 
 
-for member in range(ensemble_size):
+for member in range(1, ensemble_size):
     print(f"\n==== Training member {member} ====")
 
     final_path = os.path.join(ensemble_dir, f"{base_model_name}_member{member}.pth")
@@ -185,7 +185,7 @@ for member in range(ensemble_size):
     random.seed(base_seed + member)
 
     model = ProbUNet(1, base_ch, k_size, pdrop, num_bins, gn_groups=gn_groups).to(device)
-    opt = optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-5)
+    opt = optim.Adam(model.parameters(), lr=1e-2, weight_decay=1e-5)
     sch = ReduceLROnPlateau(opt, mode="min", factor=0.5, patience=10)
 
     best_val = float("inf")
