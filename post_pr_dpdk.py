@@ -27,12 +27,12 @@ import xarray as xr
 from unet import ProbUNet
 
 
-base_channels = 8
+base_channels = 200
 gn_groups = 1
 kernel_size = 3
 num_bins = 64
 lat_dim = 128
-batch_size = 64          # increase from 10; tune down if MPS OOMs
+batch_size = 40          # increase from 10; tune down if MPS OOMs
 outlier_iqr_factor = 3.0  # exclude members whose mean global RMSE > median + N*IQR
 
 dP_min = -700
