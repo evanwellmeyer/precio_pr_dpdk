@@ -36,10 +36,10 @@ k_size = 3
 pdrop = 0.0
 num_bins = 64
 sigma_scale = 0.6
-batch_train = 20
+batch_train = 10
 batch_val = 40
 num_epochs = 5000
-patience = 15
+patience = 5
 grad_clip = 1.0
 
 dP_min = -700
@@ -112,7 +112,6 @@ y_va_hg_tensor = torch.from_numpy(np.transpose(y_va_hg, (0, 3, 1, 2)).astype(np.
 del X_raw, y_raw
 gc.collect()
 
-
 Cx = X_tr.shape[-1]
 x_mean = X_tr.reshape(-1, Cx).mean(axis=0)
 x_std = X_tr.reshape(-1, Cx).std(axis=0).clip(1e-6)
@@ -174,7 +173,7 @@ del Ytr, Yva_hg
 gc.collect()
 
 
-for member in range(5, ensemble_size):
+for member in range(0, ensemble_size):
     print(f"\n==== Training member {member} ====")
 
     final_path = os.path.join(ensemble_dir, f"{base_model_name}_member{member}.pth")
@@ -185,7 +184,7 @@ for member in range(5, ensemble_size):
     random.seed(base_seed + member)
 
     model = ProbUNet(1, base_ch, k_size, pdrop, num_bins, gn_groups=gn_groups).to(device)
-    opt = optim.Adam(model.parameters(), lr=5e-4, weight_decay=1e-5)
+    opt = optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-5)
     sch = ReduceLROnPlateau(opt, mode="min", factor=0.5, patience=10)
 
     best_val = float("inf")
