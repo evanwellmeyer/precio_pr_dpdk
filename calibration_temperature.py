@@ -4,24 +4,26 @@ Post-hoc calibration for softmax ProbUNet outputs.
 This workflow compares four variants:
   1. Raw ensemble probabilities
   2. Temperature scaling only
-  3. Affine bin-center recalibration
-  4. Affine bin-center recalibration + temperature scaling
+  3. Mean-preserving symmetric residual calibration
+  4. Mean-preserving asymmetric residual calibration
 
-The affine-center model recalibrates the normalized target axis directly:
+The residual calibrations preserve the raw predictive mean and only adjust the
+shape of the distribution around that mean:
 
-    c'_i = a + b * c_i
+  Symmetric:
+      c'_i = mu_raw + s * (c_i - mu_raw)
+
+  Asymmetric:
+      c'_i = mu_raw + s_lo * (c_i - mu_raw),  if c_i < mu_raw
+      c'_i = mu_raw + s_hi * (c_i - mu_raw),  if c_i >= mu_raw
 
 where:
   - c_i is the original normalized bin center
-  - a is a location correction
-  - b is a spread correction
+  - mu_raw is the raw predictive mean in normalized units
+  - s, s_lo, s_hi are residual spread corrections
 
-Temperature scaling is then optionally applied on top of the probabilities:
-
-    q_i \propto p_i^(1 / T)
-
-Fitting is done on the validation split only, using a PIT-uniform objective
-(Cramer-von Mises distance) rather than MACE. MACE is still reported.
+This is meant to improve calibration while avoiding the RMSE damage caused by a
+global affine shift of the full target axis.
 """
 
 import glob
@@ -57,19 +59,17 @@ kernel_size = 3
 dP_min = -700
 dP_max = 1200
 
-# Fit on a subset of validation land pixels for speed.
 FIT_LAND_POINTS = 30000
 
 TEMP_GRID = np.unique(
     np.concatenate(
         [
             np.array([0.75, 0.9, 1.0], dtype=np.float32),
-            np.linspace(1.1, 4.0, 16, dtype=np.float32),
+            np.linspace(1.1, 3.0, 11, dtype=np.float32),
         ]
     )
 )
-SHIFT_GRID = np.linspace(-0.75, 0.75, 25, dtype=np.float32)
-SCALE_GRID = np.linspace(0.70, 1.30, 13, dtype=np.float32)
+SCALE_GRID = np.linspace(0.70, 1.50, 17, dtype=np.float32)
 EXPECTED_PROBS = np.linspace(0.0, 1.0, 21, dtype=np.float32)
 
 base_dir = Path("/Users/ewellmeyer/Documents/research")
@@ -224,41 +224,61 @@ def apply_temperature_map(probs, temperature):
     return scaled.astype(np.float32)
 
 
-def transformed_centers(bin_centers, shift, scale):
-    return np.float32(shift) + np.float32(scale) * bin_centers
+def raw_mean_from_point_probs(point_probs, centers):
+    return (point_probs * centers[None, :]).sum(axis=1)
 
 
-def pit_from_point_probs(point_probs, y_points, centers):
+def raw_mean_from_map_probs(probs, centers):
+    return (probs * centers[None, :, None, None]).sum(axis=1)
+
+
+def symmetric_residual_centers(mu_raw, centers, scale):
+    return mu_raw[:, None] + np.float32(scale) * (centers[None, :] - mu_raw[:, None])
+
+
+def asymmetric_residual_centers(point_probs, mu_raw, centers, scale_lo, scale_hi):
+    residual = centers[None, :] - mu_raw[:, None]
+    scales = np.where(residual < 0.0, np.float32(scale_lo), np.float32(scale_hi))
+    centers_new = mu_raw[:, None] + scales * residual
+    mu_new = (point_probs * centers_new).sum(axis=1, keepdims=True)
+    return centers_new + (mu_raw[:, None] - mu_new)
+
+
+def asymmetric_residual_centers_map(probs, mu_raw, centers, scale_lo, scale_hi):
+    residual = centers[None, :, None, None] - mu_raw[:, None, :, :]
+    scales = np.where(residual < 0.0, np.float32(scale_lo), np.float32(scale_hi))
+    centers_new = mu_raw[:, None, :, :] + scales * residual
+    mu_new = (probs * centers_new).sum(axis=1, keepdims=True)
+    return centers_new + (mu_raw[:, None, :, :] - mu_new)
+
+
+def point_probs_to_pit(point_probs, y_points, centers_per_point):
     cdf = np.cumsum(point_probs, axis=1)
     cdf[:, -1] = 1.0
 
-    idx = np.searchsorted(centers, y_points)
-    idx = np.clip(idx, 1, len(centers) - 1)
+    idx = np.sum(y_points[:, None] >= centers_per_point, axis=1)
+    idx = np.clip(idx, 1, point_probs.shape[1] - 1)
 
-    x0 = centers[idx - 1]
-    x1 = centers[idx]
+    x0 = centers_per_point[np.arange(len(y_points)), idx - 1]
+    x1 = centers_per_point[np.arange(len(y_points)), idx]
     y0 = cdf[np.arange(len(y_points)), idx - 1]
     y1 = cdf[np.arange(len(y_points)), idx]
     pit = y0 + (y_points - x0) * (y1 - y0) / np.maximum(x1 - x0, 1e-12)
     return np.clip(pit, 0.0, 1.0)
 
 
-def pit_from_map_probs(probs, y_true_norm, centers, landmask):
+def map_probs_to_pit(probs, y_true_norm, centers_per_point, landmask):
     cdf = np.cumsum(probs, axis=1)
     cdf[:, -1, :, :] = 1.0
 
     y_flat = y_true_norm[:, 0][:, landmask].reshape(-1)
     cdf_flat = np.transpose(cdf, (0, 2, 3, 1))[:, landmask, :].reshape(-1, num_bins)
+    centers_flat = centers_per_point[:, landmask].reshape(-1, 1)
 
-    idx = np.searchsorted(centers, y_flat)
-    idx = np.clip(idx, 1, len(centers) - 1)
-
-    x0 = centers[idx - 1]
-    x1 = centers[idx]
-    y0 = cdf_flat[np.arange(len(y_flat)), idx - 1]
-    y1 = cdf_flat[np.arange(len(y_flat)), idx]
-    pit = y0 + (y_flat - x0) * (y1 - y0) / np.maximum(x1 - x0, 1e-12)
-    return np.clip(pit, 0.0, 1.0)
+    # Rebuild centers row-wise around the local raw mean.
+    # This function expects centers_per_point to be (N, H, W) raw means; the
+    # actual calibrated centers are derived by the caller before invoking it.
+    raise NotImplementedError
 
 
 def mace_from_pit(pit_values):
@@ -281,20 +301,20 @@ def cvm_from_pit(pit_values):
     return float((1.0 / (12.0 * n)) + np.sum((u - grid) ** 2))
 
 
-def point_mean_stats(point_probs, y_points, centers):
-    mu = (point_probs * centers[None, :]).sum(axis=1)
-    diff = mu - y_points
-    return {
-        "point_rmse_norm": float(np.sqrt(np.mean(diff ** 2))),
-        "point_bias_norm": float(np.mean(diff)),
-    }
-
-
 def select_best(rows, primary_key="cvm", tie_key="point_rmse_norm", rel_tol=0.02):
     best_primary = min(row[primary_key] for row in rows)
     cutoff = best_primary * (1.0 + rel_tol) + 1e-12
     candidates = [row for row in rows if row[primary_key] <= cutoff]
     return min(candidates, key=lambda row: (row[tie_key], abs(row["mean_pit"] - 0.5)))
+
+
+def point_mean_stats(point_probs, y_points, centers_per_point):
+    mu = (point_probs * centers_per_point).sum(axis=1)
+    diff = mu - y_points
+    return {
+        "point_rmse_norm": float(np.sqrt(np.mean(diff ** 2))),
+        "point_bias_norm": float(np.mean(diff)),
+    }
 
 
 # ==============================================================================
@@ -325,13 +345,14 @@ def fit_temp_only(point_probs, y_points, bin_centers):
     print("Fitting temperature-only calibration on validation subset...")
     for temperature in TEMP_GRID:
         probs_t = apply_temperature_points(point_probs, temperature)
-        pit = pit_from_point_probs(probs_t, y_points, bin_centers)
-        stats = point_mean_stats(probs_t, y_points, bin_centers)
+        pit = point_probs_to_pit(probs_t, y_points, np.broadcast_to(bin_centers[None, :], probs_t.shape))
+        stats = point_mean_stats(probs_t, y_points, np.broadcast_to(bin_centers[None, :], probs_t.shape))
         rows.append(
             {
                 "temperature": float(temperature),
-                "shift": 0.0,
                 "scale": 1.0,
+                "scale_lo": 1.0,
+                "scale_hi": 1.0,
                 "cvm": cvm_from_pit(pit),
                 "mace": mace_from_pit(pit)[0],
                 "mean_pit": float(pit.mean()),
@@ -341,20 +362,44 @@ def fit_temp_only(point_probs, y_points, bin_centers):
     return select_best(rows), rows
 
 
-def fit_affine_given_temperature(point_probs, y_points, bin_centers, temperature):
+def fit_symmetric(point_probs, y_points, bin_centers):
     rows = []
-    probs_t = apply_temperature_points(point_probs, temperature)
-    print(f"Fitting affine-center calibration at fixed T={temperature:.3f}...")
-    for shift in SHIFT_GRID:
-        for scale in SCALE_GRID:
-            centers = transformed_centers(bin_centers, shift, scale)
-            pit = pit_from_point_probs(probs_t, y_points, centers)
-            stats = point_mean_stats(probs_t, y_points, centers)
+    print("Fitting mean-preserving symmetric residual calibration...")
+    mu_raw = raw_mean_from_point_probs(point_probs, bin_centers)
+    for scale in SCALE_GRID:
+        centers = symmetric_residual_centers(mu_raw, bin_centers, scale)
+        pit = point_probs_to_pit(point_probs, y_points, centers)
+        stats = point_mean_stats(point_probs, y_points, centers)
+        rows.append(
+            {
+                "temperature": 1.0,
+                "scale": float(scale),
+                "scale_lo": float(scale),
+                "scale_hi": float(scale),
+                "cvm": cvm_from_pit(pit),
+                "mace": mace_from_pit(pit)[0],
+                "mean_pit": float(pit.mean()),
+                **stats,
+            }
+        )
+    return select_best(rows), rows
+
+
+def fit_asymmetric(point_probs, y_points, bin_centers):
+    rows = []
+    print("Fitting mean-preserving asymmetric residual calibration...")
+    mu_raw = raw_mean_from_point_probs(point_probs, bin_centers)
+    for scale_lo in SCALE_GRID:
+        for scale_hi in SCALE_GRID:
+            centers = asymmetric_residual_centers(point_probs, mu_raw, bin_centers, scale_lo, scale_hi)
+            pit = point_probs_to_pit(point_probs, y_points, centers)
+            stats = point_mean_stats(point_probs, y_points, centers)
             rows.append(
                 {
-                    "temperature": float(temperature),
-                    "shift": float(shift),
-                    "scale": float(scale),
+                    "temperature": 1.0,
+                    "scale": 1.0,
+                    "scale_lo": float(scale_lo),
+                    "scale_hi": float(scale_hi),
                     "cvm": cvm_from_pit(pit),
                     "mace": mace_from_pit(pit)[0],
                     "mean_pit": float(pit.mean()),
@@ -364,65 +409,11 @@ def fit_affine_given_temperature(point_probs, y_points, bin_centers, temperature
     return select_best(rows), rows
 
 
-def fit_affine_then_temp(point_probs, y_points, bin_centers):
-    affine_1, affine_rows_1 = fit_affine_given_temperature(point_probs, y_points, bin_centers, 1.0)
-
-    temp_rows_1 = []
-    print("Refining temperature with affine centers fixed...")
-    centers = transformed_centers(bin_centers, affine_1["shift"], affine_1["scale"])
-    for temperature in TEMP_GRID:
-        probs_t = apply_temperature_points(point_probs, temperature)
-        pit = pit_from_point_probs(probs_t, y_points, centers)
-        stats = point_mean_stats(probs_t, y_points, centers)
-        temp_rows_1.append(
-            {
-                "temperature": float(temperature),
-                "shift": float(affine_1["shift"]),
-                "scale": float(affine_1["scale"]),
-                "cvm": cvm_from_pit(pit),
-                "mace": mace_from_pit(pit)[0],
-                "mean_pit": float(pit.mean()),
-                **stats,
-            }
-        )
-    temp_1 = select_best(temp_rows_1)
-
-    affine_2, affine_rows_2 = fit_affine_given_temperature(point_probs, y_points, bin_centers, temp_1["temperature"])
-
-    temp_rows_2 = []
-    print("Final temperature refinement...")
-    centers = transformed_centers(bin_centers, affine_2["shift"], affine_2["scale"])
-    for temperature in TEMP_GRID:
-        probs_t = apply_temperature_points(point_probs, temperature)
-        pit = pit_from_point_probs(probs_t, y_points, centers)
-        stats = point_mean_stats(probs_t, y_points, centers)
-        temp_rows_2.append(
-            {
-                "temperature": float(temperature),
-                "shift": float(affine_2["shift"]),
-                "scale": float(affine_2["scale"]),
-                "cvm": cvm_from_pit(pit),
-                "mace": mace_from_pit(pit)[0],
-                "mean_pit": float(pit.mean()),
-                **stats,
-            }
-        )
-    final = select_best(temp_rows_2)
-
-    return affine_1, final, {
-        "affine_pass_1": affine_rows_1,
-        "temp_pass_1": temp_rows_1,
-        "affine_pass_2": affine_rows_2,
-        "temp_pass_2": temp_rows_2,
-    }
-
-
 # ==============================================================================
 # 6. FULL TEST EVALUATION
 # ==============================================================================
-def evaluate_variant(prob_path, prob_shape, y_true_norm, bin_centers, landmask, y_mean, y_std, temperature, shift, scale):
+def evaluate_variant(prob_path, prob_shape, y_true_norm, bin_centers, landmask, y_mean, y_std, temperature, mode, scale=1.0, scale_lo=1.0, scale_hi=1.0):
     prob_mm = np.memmap(prob_path, dtype=np.float32, mode="r", shape=prob_shape)
-    centers = transformed_centers(bin_centers, shift, scale)
 
     pits = []
     global_sse = 0.0
@@ -431,19 +422,51 @@ def evaluate_variant(prob_path, prob_shape, y_true_norm, bin_centers, landmask, 
     land_n = 0
     sum_error = 0.0
     sum_land_error = 0.0
+    observed_counts = np.zeros(len(EXPECTED_PROBS), dtype=np.int64)
 
-    for i in tqdm(
-        range(0, prob_shape[0], BATCH_SIZE),
-        desc=f"eval T={temperature:.2f}, a={shift:.3f}, b={scale:.3f}",
-    ):
+    for i in tqdm(range(0, prob_shape[0], BATCH_SIZE), desc=f"eval {mode}"):
         probs = np.asarray(prob_mm[i : i + BATCH_SIZE])
         probs_t = apply_temperature_map(probs, temperature)
         y_batch = y_true_norm[i : i + BATCH_SIZE]
+        mu_raw = raw_mean_from_map_probs(probs, bin_centers)
 
-        pit_batch = pit_from_map_probs(probs_t, y_batch, centers, landmask)
+        if mode == "raw" or mode == "temp":
+            centers = np.broadcast_to(
+                bin_centers[None, :, None, None],
+                (probs.shape[0], num_bins, probs.shape[2], probs.shape[3]),
+            )
+        elif mode == "symmetric":
+            centers = mu_raw[:, None, :, :] + np.float32(scale) * (bin_centers[None, :, None, None] - mu_raw[:, None, :, :])
+        elif mode == "asymmetric":
+            centers = asymmetric_residual_centers_map(
+                probs_t, mu_raw, bin_centers, scale_lo, scale_hi
+            )
+        else:
+            raise ValueError(f"Unknown mode: {mode}")
+
+        cdf = np.cumsum(probs_t, axis=1)
+        cdf[:, -1, :, :] = 1.0
+
+        y_flat = y_batch[:, 0][:, landmask].reshape(-1)
+        cdf_flat = np.transpose(cdf, (0, 2, 3, 1))[:, landmask, :].reshape(-1, num_bins)
+        centers_flat = np.transpose(centers, (0, 2, 3, 1))[:, landmask, :].reshape(-1, num_bins)
+
+        idx = np.sum(y_flat[:, None] >= centers_flat, axis=1)
+        idx = np.clip(idx, 1, num_bins - 1)
+        x0 = centers_flat[np.arange(len(y_flat)), idx - 1]
+        x1 = centers_flat[np.arange(len(y_flat)), idx]
+        y0 = cdf_flat[np.arange(len(y_flat)), idx - 1]
+        y1 = cdf_flat[np.arange(len(y_flat)), idx]
+        pit_batch = y0 + (y_flat - x0) * (y1 - y0) / np.maximum(x1 - x0, 1e-12)
+        pit_batch = np.clip(pit_batch, 0.0, 1.0)
         pits.append(pit_batch)
 
-        mu_norm = (probs_t * centers[None, :, None, None]).sum(axis=1)
+        for j, p in enumerate(EXPECTED_PROBS):
+            lower_q = 0.5 - p / 2.0
+            upper_q = 0.5 + p / 2.0
+            observed_counts[j] += np.sum((pit_batch >= lower_q) & (pit_batch <= upper_q))
+
+        mu_norm = (probs_t * centers).sum(axis=1)
         truth_norm = y_batch[:, 0]
         mu = mu_norm * y_std + y_mean
         truth = truth_norm * y_std + y_mean
@@ -457,14 +480,17 @@ def evaluate_variant(prob_path, prob_shape, y_true_norm, bin_centers, landmask, 
         sum_land_error += float((diff * landmask[None]).sum())
 
     pits = np.concatenate(pits)
-    mace, observed = mace_from_pit(pits)
+    observed = observed_counts / max(len(pits), 1)
+    mace = np.mean(np.abs(observed - EXPECTED_PROBS))
 
     return {
         "temperature": float(temperature),
-        "shift": float(shift),
+        "mode": mode,
         "scale": float(scale),
+        "scale_lo": float(scale_lo),
+        "scale_hi": float(scale_hi),
         "pit": pits,
-        "mace": mace,
+        "mace": float(mace),
         "observed": observed,
         "mean_pit": float(pits.mean()),
         "global_rmse": float(np.sqrt(global_sse / max(global_n, 1))),
@@ -477,71 +503,51 @@ def evaluate_variant(prob_path, prob_shape, y_true_norm, bin_centers, landmask, 
 # ==============================================================================
 # 7. PLOTTING
 # ==============================================================================
-def rows_to_heatmap(rows, value_key):
-    grid = np.full((len(SCALE_GRID), len(SHIFT_GRID)), np.nan, dtype=np.float32)
-    shift_to_idx = {float(v): i for i, v in enumerate(SHIFT_GRID)}
-    scale_to_idx = {float(v): i for i, v in enumerate(SCALE_GRID)}
-    for row in rows:
-        i = scale_to_idx[float(row["scale"])]
-        j = shift_to_idx[float(row["shift"])]
-        grid[i, j] = row[value_key]
-    return grid
-
-
-def plot_fit_diagnostics(temp_rows, affine_rows, affine_temp_rows):
-    sns.set_context("paper", font_scale=1.15)
+def plot_fit_diagnostics(temp_rows, sym_rows, asym_rows):
+    sns.set_context("paper", font_scale=1.1)
     fig, ax = plt.subplots(1, 3, figsize=(18, 5))
 
-    ax[0].plot(
-        [row["temperature"] for row in temp_rows],
-        [row["cvm"] for row in temp_rows],
-        marker="o",
-        color="tab:blue",
-    )
+    ax[0].plot([row["temperature"] for row in temp_rows], [row["cvm"] for row in temp_rows], marker="o")
     ax[0].set_title("Temperature-Only Fit", fontweight="bold")
     ax[0].set_xlabel("Temperature")
     ax[0].set_ylabel("Validation CvM")
     ax[0].grid(True, linestyle=":", alpha=0.5)
 
-    hm = rows_to_heatmap(affine_rows, "cvm")
-    sns.heatmap(
-        hm,
-        ax=ax[1],
-        cmap="viridis",
-        cbar=True,
-        xticklabels=[f"{v:.2f}" for v in SHIFT_GRID],
-        yticklabels=[f"{v:.2f}" for v in SCALE_GRID],
-    )
-    ax[1].set_title("Affine Fit at T=1", fontweight="bold")
-    ax[1].set_xlabel("Shift a")
-    ax[1].set_ylabel("Scale b")
+    ax[1].plot([row["scale"] for row in sym_rows], [row["cvm"] for row in sym_rows], marker="o", color="tab:green")
+    ax[1].set_title("Symmetric Residual Fit", fontweight="bold")
+    ax[1].set_xlabel("Residual Scale")
+    ax[1].set_ylabel("Validation CvM")
+    ax[1].grid(True, linestyle=":", alpha=0.5)
 
-    hm = rows_to_heatmap(affine_temp_rows, "cvm")
+    asym_grid = np.full((len(SCALE_GRID), len(SCALE_GRID)), np.nan, dtype=np.float32)
+    idx_map = {float(v): i for i, v in enumerate(SCALE_GRID)}
+    for row in asym_rows:
+        asym_grid[idx_map[row["scale_lo"]], idx_map[row["scale_hi"]]] = row["cvm"]
     sns.heatmap(
-        hm,
+        asym_grid,
         ax=ax[2],
         cmap="viridis",
         cbar=True,
-        xticklabels=[f"{v:.2f}" for v in SHIFT_GRID],
+        xticklabels=[f"{v:.2f}" for v in SCALE_GRID],
         yticklabels=[f"{v:.2f}" for v in SCALE_GRID],
     )
-    ax[2].set_title("Affine Fit at Final T", fontweight="bold")
-    ax[2].set_xlabel("Shift a")
-    ax[2].set_ylabel("Scale b")
+    ax[2].set_title("Asymmetric Residual Fit", fontweight="bold")
+    ax[2].set_xlabel("Scale hi")
+    ax[2].set_ylabel("Scale lo")
 
     plt.tight_layout()
     plt.show()
 
 
-def plot_reliability_quad(raw, temp_only, affine, affine_temp):
-    sns.set_context("paper", font_scale=1.1)
+def plot_reliability_quad(raw, temp_only, symmetric, asymmetric):
+    sns.set_context("paper", font_scale=1.05)
     fig, ax = plt.subplots(2, 4, figsize=(22, 10))
 
     variants = [
         ("Raw", raw, "steelblue"),
         ("Temp Only", temp_only, "seagreen"),
-        ("Affine", affine, "mediumpurple"),
-        ("Affine + Temp", affine_temp, "darkorange"),
+        ("Symmetric", symmetric, "mediumpurple"),
+        ("Asymmetric", asymmetric, "darkorange"),
     ]
 
     for col, (title, result, color) in enumerate(variants):
@@ -556,10 +562,13 @@ def plot_reliability_quad(raw, temp_only, affine, affine_temp):
 
         ax[1, col].plot(EXPECTED_PROBS, result["observed"], "o-", color=color, linewidth=2)
         ax[1, col].plot([0, 1], [0, 1], "k--", linewidth=2)
-        ax[1, col].set_title(
-            f"T={result['temperature']:.3f}, a={result['shift']:.3f}, b={result['scale']:.3f}",
-            fontweight="bold",
-        )
+        if title == "Symmetric":
+            subtitle = f"T={result['temperature']:.3f}, s={result['scale']:.3f}"
+        elif title == "Asymmetric":
+            subtitle = f"T={result['temperature']:.3f}, slo={result['scale_lo']:.3f}, shi={result['scale_hi']:.3f}"
+        else:
+            subtitle = f"T={result['temperature']:.3f}"
+        ax[1, col].set_title(subtitle, fontweight="bold")
         ax[1, col].set_xlabel("Predicted Confidence Interval")
         ax[1, col].set_ylabel("Observed Frequency")
         ax[1, col].grid(True, linestyle=":", alpha=0.6)
@@ -586,59 +595,55 @@ try:
         FIT_LAND_POINTS,
     )
 
-    temp_only_best, temp_rows = fit_temp_only(point_probs, y_points, data["bin_centers"])
-    affine_best, affine_temp_best, affine_history = fit_affine_then_temp(point_probs, y_points, data["bin_centers"])
+    temp_best, temp_rows = fit_temp_only(point_probs, y_points, data["bin_centers"])
+    sym_best, sym_rows = fit_symmetric(point_probs, y_points, data["bin_centers"])
+    asym_best, asym_rows = fit_asymmetric(point_probs, y_points, data["bin_centers"])
 
     print("\nValidation-fit summary:")
     print(
-        f"  Temp only     | T={temp_only_best['temperature']:.4f}  "
-        f"CvM={temp_only_best['cvm']:.4f}  MACE={temp_only_best['mace']:.4f}  "
-        f"mean PIT={temp_only_best['mean_pit']:.4f}"
+        f"  Temp only  | T={temp_best['temperature']:.4f}  "
+        f"CvM={temp_best['cvm']:.4f}  MACE={temp_best['mace']:.4f}  "
+        f"mean PIT={temp_best['mean_pit']:.4f}"
     )
     print(
-        f"  Affine only   | a={affine_best['shift']:.4f}  b={affine_best['scale']:.4f}  "
-        f"CvM={affine_best['cvm']:.4f}  MACE={affine_best['mace']:.4f}  "
-        f"mean PIT={affine_best['mean_pit']:.4f}"
+        f"  Symmetric  | s={sym_best['scale']:.4f}  "
+        f"CvM={sym_best['cvm']:.4f}  MACE={sym_best['mace']:.4f}  "
+        f"mean PIT={sym_best['mean_pit']:.4f}"
     )
     print(
-        f"  Affine + Temp | T={affine_temp_best['temperature']:.4f}  "
-        f"a={affine_temp_best['shift']:.4f}  b={affine_temp_best['scale']:.4f}  "
-        f"CvM={affine_temp_best['cvm']:.4f}  MACE={affine_temp_best['mace']:.4f}  "
-        f"mean PIT={affine_temp_best['mean_pit']:.4f}"
+        f"  Asymmetric | slo={asym_best['scale_lo']:.4f}  shi={asym_best['scale_hi']:.4f}  "
+        f"CvM={asym_best['cvm']:.4f}  MACE={asym_best['mace']:.4f}  "
+        f"mean PIT={asym_best['mean_pit']:.4f}"
     )
 
-    plot_fit_diagnostics(
-        temp_rows,
-        affine_history["affine_pass_1"],
-        affine_history["affine_pass_2"],
-    )
+    plot_fit_diagnostics(temp_rows, sym_rows, asym_rows)
 
     test_prob_path, test_prob_shape = make_prob_memmap("test", data["X_test"], member_files)
 
     raw_result = evaluate_variant(
         test_prob_path, test_prob_shape, data["y_test"], data["bin_centers"],
-        data["landmask"], data["y_mean"], data["y_std"], 1.0, 0.0, 1.0
+        data["landmask"], data["y_mean"], data["y_std"], 1.0, "raw"
     )
     temp_result = evaluate_variant(
         test_prob_path, test_prob_shape, data["y_test"], data["bin_centers"],
-        data["landmask"], data["y_mean"], data["y_std"], temp_only_best["temperature"], 0.0, 1.0
+        data["landmask"], data["y_mean"], data["y_std"], temp_best["temperature"], "temp"
     )
-    affine_result = evaluate_variant(
+    sym_result = evaluate_variant(
         test_prob_path, test_prob_shape, data["y_test"], data["bin_centers"],
-        data["landmask"], data["y_mean"], data["y_std"], 1.0, affine_best["shift"], affine_best["scale"]
+        data["landmask"], data["y_mean"], data["y_std"], 1.0, "symmetric", scale=sym_best["scale"]
     )
-    affine_temp_result = evaluate_variant(
+    asym_result = evaluate_variant(
         test_prob_path, test_prob_shape, data["y_test"], data["bin_centers"],
-        data["landmask"], data["y_mean"], data["y_std"],
-        affine_temp_best["temperature"], affine_temp_best["shift"], affine_temp_best["scale"]
+        data["landmask"], data["y_mean"], data["y_std"], 1.0, "asymmetric",
+        scale_lo=asym_best["scale_lo"], scale_hi=asym_best["scale_hi"]
     )
 
     print("\nTest split summary:")
     for label, result in [
         ("Raw", raw_result),
         ("Temp only", temp_result),
-        ("Affine", affine_result),
-        ("Affine + Temp", affine_temp_result),
+        ("Symmetric", sym_result),
+        ("Asymmetric", asym_result),
     ]:
         print(
             f"  {label:13s} | MACE={result['mace']:.4f}  "
@@ -648,25 +653,23 @@ try:
             f"mean error={result['mean_error']:.4f}"
         )
 
-    plot_reliability_quad(raw_result, temp_result, affine_result, affine_temp_result)
+    plot_reliability_quad(raw_result, temp_result, sym_result, asym_result)
 
     with open(calibration_out_path, "w") as f:
         json.dump(
             {
                 "fit_land_points": int(len(y_points)),
                 "temperature_grid": TEMP_GRID.tolist(),
-                "shift_grid": SHIFT_GRID.tolist(),
                 "scale_grid": SCALE_GRID.tolist(),
-                "validation_temp_only_best": temp_only_best,
-                "validation_affine_best": affine_best,
-                "validation_affine_temp_best": affine_temp_best,
+                "validation_temp_only_best": temp_best,
+                "validation_symmetric_best": sym_best,
+                "validation_asymmetric_best": asym_best,
                 "test_raw": {
                     "mace": raw_result["mace"],
                     "mean_pit": raw_result["mean_pit"],
                     "global_rmse": raw_result["global_rmse"],
                     "land_rmse": raw_result["land_rmse"],
                     "mean_error": raw_result["mean_error"],
-                    "land_mean_error": raw_result["land_mean_error"],
                 },
                 "test_temp_only": {
                     "temperature": temp_result["temperature"],
@@ -675,28 +678,23 @@ try:
                     "global_rmse": temp_result["global_rmse"],
                     "land_rmse": temp_result["land_rmse"],
                     "mean_error": temp_result["mean_error"],
-                    "land_mean_error": temp_result["land_mean_error"],
                 },
-                "test_affine": {
-                    "shift": affine_result["shift"],
-                    "scale": affine_result["scale"],
-                    "mace": affine_result["mace"],
-                    "mean_pit": affine_result["mean_pit"],
-                    "global_rmse": affine_result["global_rmse"],
-                    "land_rmse": affine_result["land_rmse"],
-                    "mean_error": affine_result["mean_error"],
-                    "land_mean_error": affine_result["land_mean_error"],
+                "test_symmetric": {
+                    "scale": sym_result["scale"],
+                    "mace": sym_result["mace"],
+                    "mean_pit": sym_result["mean_pit"],
+                    "global_rmse": sym_result["global_rmse"],
+                    "land_rmse": sym_result["land_rmse"],
+                    "mean_error": sym_result["mean_error"],
                 },
-                "test_affine_temp": {
-                    "temperature": affine_temp_result["temperature"],
-                    "shift": affine_temp_result["shift"],
-                    "scale": affine_temp_result["scale"],
-                    "mace": affine_temp_result["mace"],
-                    "mean_pit": affine_temp_result["mean_pit"],
-                    "global_rmse": affine_temp_result["global_rmse"],
-                    "land_rmse": affine_temp_result["land_rmse"],
-                    "mean_error": affine_temp_result["mean_error"],
-                    "land_mean_error": affine_temp_result["land_mean_error"],
+                "test_asymmetric": {
+                    "scale_lo": asym_result["scale_lo"],
+                    "scale_hi": asym_result["scale_hi"],
+                    "mace": asym_result["mace"],
+                    "mean_pit": asym_result["mean_pit"],
+                    "global_rmse": asym_result["global_rmse"],
+                    "land_rmse": asym_result["land_rmse"],
+                    "mean_error": asym_result["mean_error"],
                 },
             },
             f,

@@ -28,7 +28,7 @@ use_amp = False #torch.backends.mps.is_available()
 print(f"Using device: {device} | AMP: {use_amp}")
 
 
-ensemble_size = 5
+ensemble_size = 10
 base_seed = 42
 base_ch = 200
 gn_groups = 1
@@ -174,7 +174,7 @@ del Ytr, Yva_hg
 gc.collect()
 
 
-for member in range(3, ensemble_size):
+for member in range(5, ensemble_size):
     print(f"\n==== Training member {member} ====")
 
     final_path = os.path.join(ensemble_dir, f"{base_model_name}_member{member}.pth")
@@ -185,7 +185,7 @@ for member in range(3, ensemble_size):
     random.seed(base_seed + member)
 
     model = ProbUNet(1, base_ch, k_size, pdrop, num_bins, gn_groups=gn_groups).to(device)
-    opt = optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-5)
+    opt = optim.Adam(model.parameters(), lr=5e-4, weight_decay=1e-5)
     sch = ReduceLROnPlateau(opt, mode="min", factor=0.5, patience=10)
 
     best_val = float("inf")
