@@ -39,7 +39,7 @@ sigma_scale = 0.6
 batch_train = 10
 batch_val = 40
 num_epochs = 5000
-patience = 5
+patience = 15
 grad_clip = 1.0
 
 dP_min = -700
