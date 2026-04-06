@@ -43,6 +43,8 @@ For evaluation, the expected value of that distribution is mapped back to physic
 | `unet.py` | Shared model definitions: `CustomPad`, `ConvResBlockSingle`, `Unet6R`, `SoftmaxHead`, `ProbUNet` |
 | `train_pr_dpdk.py` | Main ensemble training script for HadGEM `PR -> dPdK` |
 | `post_pr_dpdk.py` | Ensemble evaluation, baseline comparison, and RMSE summary export |
+| `train_pr_dpdk_cv.py` | Leave-one-PPE-out cross-validation training (3 folds: GA7, GA8, GA9) |
+| `post_pr_dpdk_cv.py` | Cross-validation post-analysis; evaluates each fold's held-out test PPE |
 
 ### Data Processing
 
@@ -77,22 +79,20 @@ RAW DATA
 DERIVED TARGETS
 └── CESM2/CESM2_dPdK_rg128.nc
 
-    ↓  train_pr_dpdk.py
+    ↓  train_pr_dpdk.py                  ↓  train_pr_dpdk_cv.py (optional)
 
-TRAINING ARTIFACTS
-└── weights/unet_ens_HG789_PR_dPdK_Softmax_.../
-    ├── data_splits.npz
-    ├── norm_stats.json
-    ├── born_bins.json
-    ├── best_member0.pth
-    ├── best_member1.pth
-    ├── ...
-    └── <experiment_name>_member{i}.pth
+TRAINING ARTIFACTS                        CV TRAINING ARTIFACTS
+└── weights/unet_ens_.../                 └── weights/unet_cv_.../fold_{GA7,GA8,GA9}/
+    ├── data_splits.npz                       ├── data_splits.npz
+    ├── norm_stats.json                       ├── norm_stats.json
+    ├── born_bins.json                        ├── born_bins.json
+    ├── best_member{i}.pth                    ├── best_member{i}.pth
+    └── <ens_name>_member{i}.pth              └── <cv_name>_member{i}.pth
 
-    ↓  post_pr_dpdk.py
+    ↓  post_pr_dpdk.py                        ↓  post_pr_dpdk_cv.py
 
 ANALYSIS OUTPUTS
-└── weights/unet_ens_HG789_PR_dPdK_Softmax_.../
+└── weights/unet_ens_.../
     ├── softmax_ensemble_analysis_results.json
     └── softmax_ensemble_analysis_arrays.npz
 
@@ -154,8 +154,7 @@ clean way to construct an out-of-sample `dPdK` dataset in the same grid/units.
 ### Unet6R
 
 - 6 encoder levels
-- channels scale as:
-  - `[1, 2, 4, 8, 16, 32, 64] × base_channels`
+- constant channel width `base_channels` throughout encoder, bottleneck, and decoder
 - decoder mirrors the encoder with skip connections
 - residual blocks use:
   - Conv
@@ -271,16 +270,16 @@ From `train_pr_dpdk.py`:
 
 ```text
 ensemble_size = 10
-base_ch       = 8
+base_ch       = 200
 gn_groups     = 1
 k_size        = 3
 pdrop         = 0.0
 num_bins      = 64
 sigma_scale   = 0.6
-batch_train   = 200
-batch_val     = 100
+batch_train   = 10
+batch_val     = 40
 num_epochs    = 5000
-patience      = 20
+patience      = 15
 grad_clip     = 1.0
 optimizer     = Adam(lr=1e-3, weight_decay=1e-5)
 target range  = [-700, 1200] mm/yr/K
@@ -297,7 +296,7 @@ Each experiment writes to a configuration-specific directory in:
 The directory name encodes the active hyperparameters, for example:
 
 ```text
-unet_ens_HG789_PR_dPdK_Softmax_unet6R_ch8_k3_128x_dPbins64_gn1_dpmin-700_dPmax1200
+unet_ens_HG789_PR_dPdK_Softmax_unet6R_ch200_k3_128x_dPbins64_gn1_dpmin-700_dPmax1200
 ```
 
 The training script saves:
@@ -417,6 +416,13 @@ Typical workflow:
 ```bash
 python train_pr_dpdk.py
 python post_pr_dpdk.py
+```
+
+Cross-validation workflow (leave-one-PPE-out):
+
+```bash
+python train_pr_dpdk_cv.py
+python post_pr_dpdk_cv.py
 ```
 
 Optional CESM2 preprocessing:
