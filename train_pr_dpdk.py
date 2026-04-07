@@ -28,18 +28,18 @@ use_amp = False #torch.backends.mps.is_available()
 print(f"Using device: {device} | AMP: {use_amp}")
 
 
-ensemble_size = 10
+ensemble_size = 1
 base_seed = 42
-base_ch = 200
+base_ch = 400
 gn_groups = 1
 k_size = 3
 pdrop = 0.0
 num_bins = 64
 sigma_scale = 0.6
-batch_train = 10
-batch_val = 40
+batch_train = 20
+batch_val = 20
 num_epochs = 5000
-patience = 15
+patience = 5
 grad_clip = 1.0
 
 dP_min = -700
