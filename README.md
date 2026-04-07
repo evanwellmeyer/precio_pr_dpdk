@@ -458,12 +458,32 @@ Then open the notebooks for figures and diagnostics.
 
 ## Dependencies
 
-The scripts require a Python environment with at least:
+The project runs in the `ml` conda environment (Python 3.10). To reproduce it:
 
-- `numpy`
-- `xarray`
-- `torch`
-- `scikit-learn`
-- `xesmf` for `make_cesm2_dpdK.py`
+```bash
+# Create the environment
+conda create -n ml python=3.10 -c conda-forge
 
-No pinned environment file is currently included in this repo.
+# Core scientific stack (conda)
+conda install -n ml -c conda-forge \
+    numpy=1.26.4 \
+    xarray=2025.4.0 \
+    scipy=1.15.2 \
+    scikit-learn=1.7.2 \
+    matplotlib=3.10.6 \
+    seaborn=0.13.2 \
+    netcdf4=1.7.2 \
+    cftime=1.6.4 \
+    cartopy=0.24.1 \
+    xesmf=0.8.10 \
+    cf_xarray=0.10.6 \
+    dask=2025.9.1 \
+    tqdm=4.67.1
+
+# PyTorch nightly with MPS support (pip, macOS Apple Silicon)
+# Exact versions used: torch=2.10.0.dev20251008
+conda run -n ml pip install --pre torch torchvision torchaudio \
+    --index-url https://download.pytorch.org/whl/nightly/cpu
+```
+
+`xesmf` is only required for `make_cesm2_dpdK.py`. All other scripts run without it.

@@ -31,7 +31,7 @@ use_amp = False
 print(f"Using device: {device} | AMP: {use_amp}")
 
 
-ensemble_size = 5
+ensemble_size = 3
 base_seed     = 42
 base_ch       = 8
 gn_groups     = 1
@@ -189,7 +189,7 @@ for test_ppe in PPE_FAMILIES:
         random.seed(base_seed + member)
 
         model = ProbUNet(1, base_ch, k_size, pdrop, num_bins, gn_groups=gn_groups).to(device)
-        opt   = optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-5)
+        opt   = optim.Adam(model.parameters(), lr=1e-2, weight_decay=1e-5)
         sch   = ReduceLROnPlateau(opt, mode="min", factor=0.5, patience=10)
 
         best_val   = float("inf")
