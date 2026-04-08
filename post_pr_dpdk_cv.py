@@ -22,12 +22,12 @@ import xarray as xr
 from unet import ProbUNet
 
 
-base_ch    = 8
+base_ch    = 20
 gn_groups  = 1
 k_size     = 3
 num_bins   = 64
 lat_dim    = 128
-batch_size = 100
+batch_size = 40
 outlier_iqr_factor = 3.0
 
 dP_min = -700
