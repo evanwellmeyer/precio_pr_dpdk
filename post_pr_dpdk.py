@@ -27,7 +27,7 @@ import xarray as xr
 from unet import ProbUNet
 
 
-base_channels = 200
+base_channels = 8
 gn_groups = 1
 kernel_size = 3
 num_bins = 64
