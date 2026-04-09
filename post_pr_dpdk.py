@@ -27,7 +27,7 @@ import xarray as xr
 from unet import ProbUNet
 
 
-base_channels = 8
+base_channels = 200
 gn_groups = 1
 kernel_size = 3
 num_bins = 64
@@ -35,11 +35,11 @@ lat_dim = 128
 batch_size = 40          # increase from 10; tune down if MPS OOMs
 outlier_iqr_factor = 3.0  # exclude members whose mean global RMSE > median + N*IQR
 
-dP_min = -700
-dP_max = 1200
+dP_min = -10    # -700 dpdk ; -10 dpdp
+dP_max = 75     # 1200 dpdk ; 75 dpdpp
 
 ens_name = (
-    f"unet_ens_HG789_PR_dPdK_Softmax_unet6R_ch{base_channels}_k{kernel_size}_"
+    f"unet_ens_HG789_PR_dPdP_Softmax_unet6R_ch{base_channels}_k{kernel_size}_"
     f"{lat_dim}x_dPbins{num_bins}_gn{gn_groups}_dpmin{dP_min}_dPmax{dP_max}"
 )
 ens_dir = Path("/Users/ewellmeyer/Documents/research/weights") / ens_name
@@ -50,7 +50,7 @@ bin_info_path = ens_dir / "born_bins.json"
 
 data_dir = "/Users/ewellmeyer/Documents/research/HadGEM"
 input_file = os.path.join(data_dir, f"GA789_PR_his_rg{lat_dim}.nc")
-truth_file = os.path.join(data_dir, f"GA789_dPdK_rg{lat_dim}.nc")
+truth_file = os.path.join(data_dir, f"GA789_dPdP_rg{lat_dim}.nc")
 landmask_file = os.path.join(data_dir, "hadgem_landmask_rg128.nc")
 
 device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")

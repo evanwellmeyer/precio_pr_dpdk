@@ -46,18 +46,18 @@ patience      = 20
 grad_clip     = 1.0
 val_fraction  = 0.2
 
-dP_min = -700
-dP_max = 1200
+dP_min = -10    # -700 dpdk ; -10 dpdp
+dP_max = 75     # 1200 dpdk ; 75 dpdp
 
 PPE_FAMILIES = ["GA7", "GA8", "GA9"]
 
 hadgem_dir = "/Users/ewellmeyer/Documents/research/HadGEM"
 input_file = os.path.join(hadgem_dir, "GA789_PR_his_rg128.nc")
-truth_file = os.path.join(hadgem_dir, "GA789_dPdK_rg128.nc")
+truth_file = os.path.join(hadgem_dir, "GA789_dPdP_rg128.nc")
 weights_dir = "/Users/ewellmeyer/Documents/research/weights"
 
 base_model_name = (
-    f"unet_cv_HG789_PR_dPdK_Softmax_unet6R_ch{base_ch}_k{k_size}_"
+    f"unet_cv_HG789_PR_dPdP_Softmax_unet6R_ch{base_ch}_k{k_size}_"
     f"128x_dPbins{num_bins}_gn{gn_groups}_dpmin{dP_min}_dPmax{dP_max}"
 )
 
@@ -95,7 +95,7 @@ realizations = ds_in.realization.values
 ppe_of = {r: r.split("_")[0] for r in realizations}   # e.g. 'GA7_42' -> 'GA7'
 
 X_all = ds_in["PR"].values.astype(np.float32)[..., np.newaxis]    # (N, H, W, 1)
-y_all = ds_tgt["dPdK"].values.astype(np.float32)[..., np.newaxis] # (N, H, W, 1)
+y_all = ds_tgt["dPdP"].values.astype(np.float32)[..., np.newaxis] # (N, H, W, 1)
 ds_in.close(); ds_tgt.close()
 print(f"Total members: {len(realizations)}")
 
@@ -189,7 +189,7 @@ for test_ppe in PPE_FAMILIES:
         random.seed(base_seed + member)
 
         model = ProbUNet(1, base_ch, k_size, pdrop, num_bins, gn_groups=gn_groups).to(device)
-        opt   = optim.Adam(model.parameters(), lr=1e-2, weight_decay=1e-5)
+        opt   = optim.RAdam(model.parameters(), lr=1e-2, weight_decay=1e-5)
         sch   = ReduceLROnPlateau(opt, mode="min", factor=0.5, patience=10)
 
         best_val   = float("inf")

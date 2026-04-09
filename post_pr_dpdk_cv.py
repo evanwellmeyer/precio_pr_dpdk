@@ -30,8 +30,8 @@ lat_dim    = 128
 batch_size = 40
 outlier_iqr_factor = 3.0
 
-dP_min = -700
-dP_max = 1200
+dP_min = -700    # -700 dpdk ; -10 dpdp
+dP_max = 1200     # 1200 dpdk ; 75 dpdpp
 
 PPE_FAMILIES = ["GA7", "GA8", "GA9"]
 
