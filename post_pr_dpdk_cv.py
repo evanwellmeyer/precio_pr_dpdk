@@ -22,6 +22,7 @@ import xarray as xr
 from unet import ProbUNet
 
 
+arch       = "flat"   # "flat" or "pyramid" — must match the training run
 base_ch    = 20
 gn_groups  = 1
 k_size     = 3
@@ -36,7 +37,7 @@ dP_max = 1200     # 1200 dpdk ; 75 dpdpp
 PPE_FAMILIES = ["GA7", "GA8", "GA9"]
 
 base_model_name = (
-    f"unet_cv_HG789_PR_dPdK_Softmax_unet6R_ch{base_ch}_k{k_size}_"
+    f"unet_cv_HG789_PR_dPdK_Softmax_unet6R_{arch}_ch{base_ch}_k{k_size}_"
     f"128x_dPbins{num_bins}_gn{gn_groups}_dpmin{dP_min}_dPmax{dP_max}"
 )
 weights_base = Path("/Users/ewellmeyer/Documents/research/weights") / base_model_name
@@ -133,7 +134,7 @@ for test_ppe in PPE_FAMILIES:
 
     models = []
     for m_idx, path in enumerate(model_files):
-        model = ProbUNet(1, base_ch, k_size, 0.0, num_bins, gn_groups=gn_groups).to(device)
+        model = ProbUNet(1, base_ch, k_size, 0.0, num_bins, gn_groups=gn_groups, pyramid=(arch == "pyramid")).to(device)
         ckpt  = torch.load(path, map_location=device)
         state = ckpt["model"] if "model" in ckpt else ckpt
         missing, _ = model.load_state_dict(state, strict=False)
