@@ -33,7 +33,7 @@ print(f"Using device: {device} | AMP: {use_amp}")
 
 ensemble_size = 3
 base_seed     = 42
-arch          = "flat"   # "flat" or "pyramid"
+arch          = "pyramid"   # "flat" or "pyramid"
 base_ch       = 20
 gn_groups     = 1
 k_size        = 3
@@ -47,18 +47,18 @@ patience      = 20
 grad_clip     = 1.0
 val_fraction  = 0.2
 
-dP_min = -10    # -700 dpdk ; -10 dpdp
-dP_max = 75     # 1200 dpdk ; 75 dpdp
+dP_min = -700    # -700 dpdk ; -10 dpdp
+dP_max = 1200     # 1200 dpdk ; 75 dpdp
 
 PPE_FAMILIES = ["GA7", "GA8", "GA9"]
 
 hadgem_dir = "/Users/ewellmeyer/Documents/research/HadGEM"
 input_file = os.path.join(hadgem_dir, "GA789_PR_his_rg128.nc")
-truth_file = os.path.join(hadgem_dir, "GA789_dPdP_rg128.nc")
+truth_file = os.path.join(hadgem_dir, "GA789_dPdK_rg128.nc")
 weights_dir = "/Users/ewellmeyer/Documents/research/weights"
 
 base_model_name = (
-    f"unet_cv_HG789_PR_dPdP_Softmax_unet6R_{arch}_ch{base_ch}_k{k_size}_"
+    f"unet_cv_HG789_PR_dPdK_Softmax_unet6R_{arch}_ch{base_ch}_k{k_size}_"
     f"128x_dPbins{num_bins}_gn{gn_groups}_dpmin{dP_min}_dPmax{dP_max}"
 )
 
@@ -96,7 +96,7 @@ realizations = ds_in.realization.values
 ppe_of = {r: r.split("_")[0] for r in realizations}   # e.g. 'GA7_42' -> 'GA7'
 
 X_all = ds_in["PR"].values.astype(np.float32)[..., np.newaxis]    # (N, H, W, 1)
-y_all = ds_tgt["dPdP"].values.astype(np.float32)[..., np.newaxis] # (N, H, W, 1)
+y_all = ds_tgt["dPdK"].values.astype(np.float32)[..., np.newaxis] # (N, H, W, 1)
 ds_in.close(); ds_tgt.close()
 print(f"Total members: {len(realizations)}")
 
