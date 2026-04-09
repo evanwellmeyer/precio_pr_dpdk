@@ -41,40 +41,45 @@ class Unet6R(nn.Module):
         kernel_size=3,
         p_drop=0.1,
         gn_groups=1,
+        pyramid=False,
     ):
         super().__init__()
         k = kernel_size
         c = base_channels
 
-        self.enc1 = ConvResBlockSingle(input_channels, c, k_size=k, p_drop=p_drop, gn_groups=gn_groups)
+        # Flat: all levels use base_channels.
+        # Pyramid: channels double at each encoder level (c, 2c, 4c, 8c, 16c, 32c).
+        e = [c * (2**i if pyramid else 1) for i in range(6)]
+
+        self.enc1 = ConvResBlockSingle(input_channels, e[0], k_size=k, p_drop=p_drop, gn_groups=gn_groups)
         self.pool1 = nn.MaxPool2d(2)
-        self.enc2 = ConvResBlockSingle(c, c, k_size=k, p_drop=p_drop, gn_groups=gn_groups)
+        self.enc2 = ConvResBlockSingle(e[0], e[1], k_size=k, p_drop=p_drop, gn_groups=gn_groups)
         self.pool2 = nn.MaxPool2d(2)
-        self.enc3 = ConvResBlockSingle(c, c, k_size=k, p_drop=p_drop, gn_groups=gn_groups)
+        self.enc3 = ConvResBlockSingle(e[1], e[2], k_size=k, p_drop=p_drop, gn_groups=gn_groups)
         self.pool3 = nn.MaxPool2d(2)
-        self.enc4 = ConvResBlockSingle(c, c, k_size=k, p_drop=p_drop, gn_groups=gn_groups)
+        self.enc4 = ConvResBlockSingle(e[2], e[3], k_size=k, p_drop=p_drop, gn_groups=gn_groups)
         self.pool4 = nn.MaxPool2d(2)
-        self.enc5 = ConvResBlockSingle(c, c, k_size=k, p_drop=p_drop, gn_groups=gn_groups)
+        self.enc5 = ConvResBlockSingle(e[3], e[4], k_size=k, p_drop=p_drop, gn_groups=gn_groups)
         self.pool5 = nn.MaxPool2d(2)
-        self.enc6 = ConvResBlockSingle(c, c, k_size=k, p_drop=p_drop, gn_groups=gn_groups)
+        self.enc6 = ConvResBlockSingle(e[4], e[5], k_size=k, p_drop=p_drop, gn_groups=gn_groups)
         self.pool6 = nn.MaxPool2d(2)
 
-        self.bottleneck = ConvResBlockSingle(c, c, k_size=k, p_drop=p_drop, gn_groups=gn_groups)
+        self.bottleneck = ConvResBlockSingle(e[5], e[5], k_size=k, p_drop=p_drop, gn_groups=gn_groups)
 
-        self.upconv1 = nn.ConvTranspose2d(c, c, kernel_size=2, stride=2)
-        self.dec1 = ConvResBlockSingle(c + c, c, k_size=k, p_drop=p_drop, gn_groups=gn_groups)
-        self.upconv2 = nn.ConvTranspose2d(c, c, kernel_size=2, stride=2)
-        self.dec2 = ConvResBlockSingle(c + c, c, k_size=k, p_drop=p_drop, gn_groups=gn_groups)
-        self.upconv3 = nn.ConvTranspose2d(c, c, kernel_size=2, stride=2)
-        self.dec3 = ConvResBlockSingle(c + c, c, k_size=k, p_drop=p_drop, gn_groups=gn_groups)
-        self.upconv4 = nn.ConvTranspose2d(c, c, kernel_size=2, stride=2)
-        self.dec4 = ConvResBlockSingle(c + c, c, k_size=k, p_drop=p_drop, gn_groups=gn_groups)
-        self.upconv5 = nn.ConvTranspose2d(c, c, kernel_size=2, stride=2)
-        self.dec5 = ConvResBlockSingle(c + c, c, k_size=k, p_drop=p_drop, gn_groups=gn_groups)
-        self.upconv6 = nn.ConvTranspose2d(c, c, kernel_size=2, stride=2)
-        self.dec6 = ConvResBlockSingle(c + c, c, k_size=k, p_drop=p_drop, gn_groups=gn_groups)
+        self.upconv1 = nn.ConvTranspose2d(e[5], e[5], kernel_size=2, stride=2)
+        self.dec1    = ConvResBlockSingle(2*e[5], e[4], k_size=k, p_drop=p_drop, gn_groups=gn_groups)
+        self.upconv2 = nn.ConvTranspose2d(e[4], e[4], kernel_size=2, stride=2)
+        self.dec2    = ConvResBlockSingle(2*e[4], e[3], k_size=k, p_drop=p_drop, gn_groups=gn_groups)
+        self.upconv3 = nn.ConvTranspose2d(e[3], e[3], kernel_size=2, stride=2)
+        self.dec3    = ConvResBlockSingle(2*e[3], e[2], k_size=k, p_drop=p_drop, gn_groups=gn_groups)
+        self.upconv4 = nn.ConvTranspose2d(e[2], e[2], kernel_size=2, stride=2)
+        self.dec4    = ConvResBlockSingle(2*e[2], e[1], k_size=k, p_drop=p_drop, gn_groups=gn_groups)
+        self.upconv5 = nn.ConvTranspose2d(e[1], e[1], kernel_size=2, stride=2)
+        self.dec5    = ConvResBlockSingle(2*e[1], e[0], k_size=k, p_drop=p_drop, gn_groups=gn_groups)
+        self.upconv6 = nn.ConvTranspose2d(e[0], e[0], kernel_size=2, stride=2)
+        self.dec6    = ConvResBlockSingle(2*e[0], e[0], k_size=k, p_drop=p_drop, gn_groups=gn_groups)
 
-        self.final_conv = nn.Conv2d(c, output_channels, kernel_size=1)
+        self.final_conv = nn.Conv2d(e[0], output_channels, kernel_size=1)
 
     def forward(self, x):
         original_h, original_w = x.shape[2], x.shape[3]
@@ -127,7 +132,7 @@ class SoftmaxHead(nn.Module):
 
 
 class ProbUNet(nn.Module):
-    def __init__(self, input_channels, base_channels, kernel_size, p_drop, num_bins, gn_groups=1):
+    def __init__(self, input_channels, base_channels, kernel_size, p_drop, num_bins, gn_groups=1, pyramid=False):
         super().__init__()
         self.backbone = Unet6R(
             input_channels=input_channels,
@@ -136,6 +141,7 @@ class ProbUNet(nn.Module):
             kernel_size=kernel_size,
             p_drop=p_drop,
             gn_groups=gn_groups,
+            pyramid=pyramid,
         )
         self.head = SoftmaxHead(base_channels, num_bins)
 

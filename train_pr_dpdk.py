@@ -39,7 +39,7 @@ sigma_scale = 0.6
 batch_train = 20
 batch_val = 20
 num_epochs = 5000
-patience = 20
+patience = 15
 grad_clip = 1.0
 
 dP_min = -700    # -700 dpdk ; -10 dpdp
@@ -173,7 +173,7 @@ del Ytr, Yva_hg
 gc.collect()
 
 
-for member in range(4, ensemble_size):
+for member in range(5, ensemble_size):
     print(f"\n==== Training member {member} ====")
 
     final_path = os.path.join(ensemble_dir, f"{base_model_name}_member{member}.pth")

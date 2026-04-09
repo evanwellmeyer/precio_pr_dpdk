@@ -33,6 +33,7 @@ print(f"Using device: {device} | AMP: {use_amp}")
 
 ensemble_size = 3
 base_seed     = 42
+arch          = "flat"   # "flat" or "pyramid"
 base_ch       = 20
 gn_groups     = 1
 k_size        = 3
@@ -57,7 +58,7 @@ truth_file = os.path.join(hadgem_dir, "GA789_dPdP_rg128.nc")
 weights_dir = "/Users/ewellmeyer/Documents/research/weights"
 
 base_model_name = (
-    f"unet_cv_HG789_PR_dPdP_Softmax_unet6R_ch{base_ch}_k{k_size}_"
+    f"unet_cv_HG789_PR_dPdP_Softmax_unet6R_{arch}_ch{base_ch}_k{k_size}_"
     f"128x_dPbins{num_bins}_gn{gn_groups}_dpmin{dP_min}_dPmax{dP_max}"
 )
 
@@ -188,7 +189,7 @@ for test_ppe in PPE_FAMILIES:
         np.random.seed(base_seed + member)
         random.seed(base_seed + member)
 
-        model = ProbUNet(1, base_ch, k_size, pdrop, num_bins, gn_groups=gn_groups).to(device)
+        model = ProbUNet(1, base_ch, k_size, pdrop, num_bins, gn_groups=gn_groups, pyramid=(arch == "pyramid")).to(device)
         opt   = optim.RAdam(model.parameters(), lr=1e-2, weight_decay=1e-5)
         sch   = ReduceLROnPlateau(opt, mode="min", factor=0.5, patience=10)
 
