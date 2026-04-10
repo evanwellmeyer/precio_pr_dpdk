@@ -22,7 +22,7 @@ import xarray as xr
 from unet import ProbUNet
 
 
-arch       = "flat"   # "flat" or "pyramid" — must match the training run
+arch       = "pyramid"   # "flat" or "pyramid" — must match the training run
 base_ch    = 20
 gn_groups  = 1
 k_size     = 3
