@@ -1,111 +1,142 @@
 # precip_pr_dpdk
 
-Probabilistic U-Net for gridded precipitation-change prediction. Given historical
-precipitation climatology (`PR`), the model predicts a full per-pixel distribution
-over `dPdK` (precipitation change per degree global warming, `mm/yr/K`) rather
-than a single deterministic field.
+Probabilistic U-Net workflows for gridded precipitation-change prediction from
+historical precipitation climatology. The core model predicts a full per-pixel
+distribution over a discretized target axis instead of a single deterministic
+field.
+
+This repo currently contains three related but not perfectly identical tracks:
+
+1. a standard HadGEM `PR -> dPdK` ensemble training script
+2. a matched leave-one-PPE-out `PR -> dPdK` cross-validation pipeline
+3. analysis notebooks centered on an existing `dPdK` run with `ch=200`
+
+The most important caveat is that `train_pr_dpdk.py` and `post_pr_dpdk.py` are
+not currently a drop-in matched pair: the training script is configured for
+`dPdK`, while `post_pr_dpdk.py` is currently hard-coded for a separate `dPdP`
+run.
 
 ---
 
-## Overview
+## What Is In Here
 
-**Task:** Predict gridded `dPdK` from historical precipitation climatology:
+### Shared model code
 
-- input: `PR` historical climatology (`mm/yr`)
-- target: `dPdK` future precipitation change per degree warming (`mm/yr/K`)
-
-**Method:** Softmax probabilistic regression. The network discretizes target space
-into fixed bins, predicts a categorical distribution over those bins at each grid
-cell, and trains against soft Gaussian-style labels centered on the normalized
-true target.
-
-**Network:** `ProbUNet` built on `Unet6R`:
-
-- 6-level residual U-Net
-- custom geo-aware padding
-  - reflect padding in latitude
-  - circular padding in longitude
-- GroupNorm + Mish residual blocks
-- `1x1` softmax head over `num_bins` output bins
-
-**Output:** A tensor of per-bin probabilities with shape `(B, num_bins, H, W)`.
-For evaluation, the expected value of that distribution is mapped back to physical
-`dPdK` units.
-
----
-
-## Files
-
-### Core
-
-| File | Purpose |
-|------|---------|
+| File | Role |
+|------|------|
 | `unet.py` | Shared model definitions: `CustomPad`, `ConvResBlockSingle`, `Unet6R`, `SoftmaxHead`, `ProbUNet` |
-| `train_pr_dpdk.py` | Main ensemble training script for HadGEM `PR -> dPdK` |
-| `post_pr_dpdk.py` | Ensemble evaluation, baseline comparison, and RMSE summary export |
-| `train_pr_dpdk_cv.py` | Leave-one-PPE-out cross-validation training (3 folds: GA7, GA8, GA9) |
-| `post_pr_dpdk_cv.py` | Cross-validation post-analysis; evaluates each fold's held-out test PPE |
 
-### Data Processing
+### Standard ensemble workflow
 
-| File | Purpose |
-|------|---------|
-| `make_cesm2_dpdK.py` | Build `CESM2_dPdK_rg128.nc` from CESM2 PPE SST4K precipitation and historical/dT fields |
+| File | Role | Current default target |
+|------|------|------------------------|
+| `train_pr_dpdk.py` | Standard HadGEM ensemble training | `dPdK` |
+| `post_pr_dpdk.py` | Standalone post-analysis for a saved ensemble | `dPdP` |
 
-### Diagnostics / Exploration
+### Cross-validation workflow
 
-| File | Purpose |
-|------|---------|
-| `maps.ipynb` | Spatial plotting and map diagnostics |
-| `calibration.ipynb` | Reliability / calibration checks for the probabilistic output |
-| `PDFs.ipynb` | Distribution and probability-density diagnostics |
-| `gaussian_weighting.ipynb` | Soft-label / Gaussian weighting experiments |
-| `gridpoint_regression.ipynb` | Pointwise regression exploration |
-| `correlations.ipynb` | Correlation-based diagnostics and comparisons |
+| File | Role |
+|------|------|
+| `train_pr_dpdk_cv.py` | Leave-one-PPE-out training over `GA7`, `GA8`, `GA9` |
+| `post_pr_dpdk_cv.py` | Matched CV evaluation on the held-out PPE |
+
+### Utilities
+
+| File | Role |
+|------|------|
+| `make_cesm2_dpdK.py` | Build `CESM2_dPdK_rg128.nc` from CESM2 SST4K precipitation and historical/dT fields |
+
+### Notebooks
+
+| File | Role | Current state |
+|------|------|---------------|
+| `calibration.ipynb` | PIT / reliability / post-hoc calibration checks | Updated |
+| `maps.ipynb` | Spatial diagnostics and uncertainty maps | Updated |
+| `PDFs.ipynb` | Improvement-distribution figure | Simplified to the first figure only |
+| `gaussian_weighting.ipynb` | Soft-label experiments | Exploratory |
+| `gridpoint_regression.ipynb` | Pointwise baseline experiments | Exploratory |
+| `correlations.ipynb` | Correlation diagnostics | Exploratory |
+| `channel_sweep.ipynb` | Channel-count comparisons | Exploratory |
 
 ---
 
-## Pipeline
+## Current Repo Status
 
-```text
-RAW DATA
-├── HadGEM/GA789_PR_his_rg128.nc
-├── HadGEM/GA789_dPdK_rg128.nc
-├── HadGEM/hadgem_landmask_rg128.nc
-└── CESM2/SST4K/... PR files + CESM2 historical/dT fields
+### 1. Shared architecture
 
-    ↓  make_cesm2_dpdK.py  (optional external utility)
+The model now lives in `unet.py` and is imported by the scripts and notebooks.
+`ProbUNet` wraps a 6-level residual U-Net plus a `1x1` softmax head.
 
-DERIVED TARGETS
-└── CESM2/CESM2_dPdK_rg128.nc
+`Unet6R` supports two channel layouts:
 
-    ↓  train_pr_dpdk.py                  ↓  train_pr_dpdk_cv.py (optional)
+- `pyramid=False`: flat-width U-Net, all levels use `base_channels`
+- `pyramid=True`: channels double down the encoder and contract in the decoder
 
-TRAINING ARTIFACTS                        CV TRAINING ARTIFACTS
-└── weights/unet_ens_.../                 └── weights/unet_cv_.../fold_{GA7,GA8,GA9}/
-    ├── data_splits.npz                       ├── data_splits.npz
-    ├── norm_stats.json                       ├── norm_stats.json
-    ├── born_bins.json                        ├── born_bins.json
-    ├── best_member{i}.pth                    ├── best_member{i}.pth
-    └── <ens_name>_member{i}.pth              └── <cv_name>_member{i}.pth
+### 2. Standard training script
 
-    ↓  post_pr_dpdk.py                        ↓  post_pr_dpdk_cv.py
+`train_pr_dpdk.py` is the main non-CV training entry point. It currently trains
+HadGEM `PR -> dPdK` with:
 
-ANALYSIS OUTPUTS
-└── weights/unet_ens_.../
-    ├── softmax_ensemble_analysis_results.json
-    └── softmax_ensemble_analysis_arrays.npz
+- flat `Unet6R`
+- `base_ch = 256`
+- `num_bins = 64`
+- target range `[-700, 1200] mm/yr/K`
+- `RAdam(lr=1e-4, weight_decay=1e-5)`
+- AMP disabled on MPS (`use_amp = False`)
 
-    ↓  notebooks
+Important operational note: the member loop currently starts at:
 
-MAPS / CALIBRATION / PDFS / FIGURES
+```python
+for member in range(5, ensemble_size):
 ```
 
+so the script, as written, only trains members `5..9`. That looks intentional
+for resuming a partially completed run, but it is not a full fresh 10-member
+loop unless you edit it.
+
+### 3. Standard post-analysis script
+
+`post_pr_dpdk.py` is currently configured for a different saved experiment:
+
+- target file: `GA789_dPdP_rg128.nc`
+- run name contains `dPdP`
+- `base_channels = 200`
+- target range `[-10, 75]`
+
+So despite the filename, it is not currently the default post-processing partner
+for `train_pr_dpdk.py`.
+
+### 4. Cross-validation pipeline
+
+The matched `dPdK` train/post pair in the repo right now is:
+
+- `train_pr_dpdk_cv.py`
+- `post_pr_dpdk_cv.py`
+
+This workflow uses:
+
+- `arch = "pyramid"`
+- `base_ch = 20`
+- target range `[-700, 1200]`
+- held-out PPE folds for `GA7`, `GA8`, `GA9`
+
+### 5. Notebook analysis state
+
+The updated notebooks are centered on an existing `dPdK` run with:
+
+- `base_channels = 200`
+- `num_bins = 64`
+- `gn_groups = 1`
+- target range `[-700, 1200]`
+
+Those notebooks are analysis artifacts for that run; they are not automatically
+synced to the current `train_pr_dpdk.py` default of `base_ch = 256`.
+
 ---
 
-## Data Assumptions
+## Data Layout
 
-The scripts currently assume local data live under:
+The scripts assume a local workstation layout:
 
 ```text
 /Users/ewellmeyer/Documents/research/HadGEM
@@ -113,19 +144,16 @@ The scripts currently assume local data live under:
 /Users/ewellmeyer/Documents/research/weights
 ```
 
-### HadGEM Training Data
+### HadGEM files used in this repo
 
-`train_pr_dpdk.py` expects:
+Depending on the script, the code expects some combination of:
 
 - `GA789_PR_his_rg128.nc`
 - `GA789_dPdK_rg128.nc`
+- `GA789_dPdP_rg128.nc`
+- `hadgem_landmask_rg128.nc`
 
-These are read as:
-
-- `PR`: historical precipitation climatology
-- `dPdK`: target precipitation change per degree warming
-
-### CESM2 Utility Input
+### CESM2 files used by the utility
 
 `make_cesm2_dpdK.py` expects:
 
@@ -133,357 +161,413 @@ These are read as:
 - `CESM2_PR_his_rg128.nc`
 - `CESM2_dT_rg128.nc`
 
-It produces:
+and writes:
 
 - `CESM2_dPdK_rg128.nc`
 
-That script is not part of the main HadGEM training pipeline, but it provides a
-clean way to construct an out-of-sample `dPdK` dataset in the same grid/units.
-
 ---
 
-## Model Architecture
+## Model And Target Formulation
 
-**ProbUNet** (`unet.py`)
+### Inputs and outputs
 
-- Input: historical precipitation field `PR` → `(B, 1, H, W)`
-- Backbone: `Unet6R`
-- Head: per-pixel categorical distribution over `num_bins`
-- Output: probability tensor `(B, num_bins, H, W)`
+- input: historical precipitation climatology `PR`
+- target: either `dPdK` or `dPdP`, depending on the script
+- model output: per-pixel categorical probabilities over fixed target bins
 
-### Unet6R
-
-- 6 encoder levels
-- constant channel width `base_channels` throughout encoder, bottleneck, and decoder
-- decoder mirrors the encoder with skip connections
-- residual blocks use:
-  - Conv
-  - GroupNorm
-  - Mish
-  - optional Dropout
-
-### Geo-Aware Padding
-
-Global fields need different behavior in latitude and longitude:
-
-- latitude: reflect padding
-- longitude: circular padding
-
-This avoids artificial edge effects at the dateline while preserving sensible
-boundary behavior near the poles.
-
-### Internal Padding
-
-The U-Net pads inputs internally so spatial dimensions are divisible by `2^6 = 64`,
-then crops the output back to the original grid. This lets the model run cleanly
-on the `rg128` grid without manual preprocessing.
-
----
-
-## Probabilistic Formulation
-
-The target is not trained as a single scalar regression output. Instead:
-
-1. Define a fixed set of physical target bins over `dPdK`
-2. Normalize those bin centers using HadGEM train-only target statistics
-3. Build soft labels around the normalized true target
-4. Train the model to predict a probability distribution over bins
-
-### Soft Labels
-
-For each grid cell, the true normalized target is converted into a soft target:
+The output tensor has shape:
 
 ```text
-y_soft(b) ∝ exp[-0.5 * ((y_true - bin_center_b) / sigma_b)^2]
+(B, num_bins, H, W)
+```
+
+### Geo-aware padding
+
+`CustomPad` uses:
+
+- reflect padding in latitude
+- circular padding in longitude
+
+This is meant to reduce dateline artifacts while keeping sensible poleward
+behavior.
+
+### Internal padding and cropping
+
+`Unet6R` pads fields internally so height and width are divisible by `2^6 = 64`,
+then crops the output back to the original grid.
+
+### Soft labels
+
+Training is not scalar regression. The target is converted to a soft label over
+the discretized target axis:
+
+```text
+y_soft(b) ∝ exp[-0.5 * ((y_true - c_b) / sigma_b)^2]
 ```
 
 where:
 
-- `bin_center_b` is the normalized bin center
+- `c_b` is the normalized bin center
 - `sigma_b` comes from local bin spacing times `sigma_scale`
 
-The final soft label is normalized to sum to 1 across bins.
+These labels are symmetric around the true value on the normalized target axis.
 
 ### Loss
 
-The training objective is the soft categorical negative log-likelihood:
+The scripts train with a soft categorical negative log-likelihood:
 
 ```text
-L = - mean_{pixels,bins} [ y_soft * log(p_pred) ]
+L = - mean(y_soft * log p_pred)
 ```
 
-In the current script:
-
-- probabilities are clamped before `log`
-- AMP is disabled by default on MPS for numerical stability
+`train_pr_dpdk.py` and `train_pr_dpdk_cv.py` clamp probabilities before taking
+the log to avoid numerical issues.
 
 ### Prediction
 
-At evaluation time, the expected target is reconstructed as:
+The expected target field is reconstructed from the predicted probabilities:
 
 ```text
-E[dPdK] = sum_b p(b) * bin_center_b
+E[y] = sum_b p(b) c_b
 ```
 
-then mapped from normalized units back to physical `mm/yr/K`.
+then denormalized back to physical units.
 
 ---
 
-## Training
+## Standard HadGEM dPdK Training
 
-### Main Script
-
-Run from this repo directory:
+Run:
 
 ```bash
 python train_pr_dpdk.py
 ```
 
-The training script does the following:
+### What it does
 
 1. loads HadGEM `PR` and `dPdK`
-2. creates a random train / val / test split
-3. saves the split indices to `data_splits.npz`
-4. computes normalization statistics from the train split only
-5. saves normalization metadata to `norm_stats.json`
-6. defines fixed target bins and soft-label widths
-7. saves bin metadata to `born_bins.json`
-8. trains an ensemble of probabilistic U-Nets with early stopping
-9. exports checkpoints and final member weights
+2. builds a random sample-wise train/val/test split with `random_state=42`
+3. saves `data_splits.npz`
+4. computes train-only normalization stats and saves `norm_stats.json`
+5. defines fixed bins and soft-label widths and saves `born_bins.json`
+6. trains an ensemble of `ProbUNet` members with early stopping
+7. saves `best_member{i}.pth` plus exported member weights
 
-### Split Strategy
-
-The current split is sample-wise and deterministic with `random_state=42`:
-
-- train: `70%`
-- validation: `10%`
-- test: `20%`
-
-Implementation detail:
-
-- first split off `30%` from train
-- then split that temporary set into val/test at `1/3` vs `2/3`
-
-### Current Default Hyperparameters
-
-From `train_pr_dpdk.py`:
+### Current defaults from `train_pr_dpdk.py`
 
 ```text
 ensemble_size = 10
-base_ch       = 200
+base_seed     = 42
+base_ch       = 256
 gn_groups     = 1
 k_size        = 3
 pdrop         = 0.0
 num_bins      = 64
 sigma_scale   = 0.6
-batch_train   = 10
-batch_val     = 40
+batch_train   = 20
+batch_val     = 20
 num_epochs    = 5000
 patience      = 15
 grad_clip     = 1.0
-optimizer     = Adam(lr=1e-3, weight_decay=1e-5)
-target range  = [-700, 1200] mm/yr/K
+optimizer     = RAdam(lr=1e-4, weight_decay=1e-5)
+target range  = [-700, 1200]
+AMP           = False
+member loop   = range(5, ensemble_size)
 ```
 
-### Saved Outputs
-
-Each experiment writes to a configuration-specific directory in:
+### Output directory pattern
 
 ```text
-/Users/ewellmeyer/Documents/research/weights
+unet_ens_HG789_PR_dPdK_Softmax_unet6R_ch{base_ch}_k{k_size}_128x_dPbins{num_bins}_gn{gn_groups}_dpmin{dP_min}_dPmax{dP_max}
 ```
 
-The directory name encodes the active hyperparameters, for example:
+Example with current defaults:
 
 ```text
-unet_ens_HG789_PR_dPdK_Softmax_unet6R_ch200_k3_128x_dPbins64_gn1_dpmin-700_dPmax1200
+unet_ens_HG789_PR_dPdK_Softmax_unet6R_ch256_k3_128x_dPbins64_gn1_dpmin-700_dPmax1200
 ```
 
-The training script saves:
+Saved artifacts:
 
 - `data_splits.npz`
 - `norm_stats.json`
 - `born_bins.json`
 - `best_member{i}.pth`
-- `<experiment_name>_member{i}.pth`
-
-`best_member{i}.pth` contains optimizer state and the best validation checkpoint.
-The final exported member file is reloaded from the best checkpoint before saving.
+- `<run_name>_member{i}.pth`
 
 ---
 
-## Post-Processing
+## Standalone Post-Analysis Scripts
 
-### Main Script
+### `post_pr_dpdk.py`
+
+Run:
 
 ```bash
 python post_pr_dpdk.py
 ```
 
-This script:
+What it does:
 
-1. loads the saved ensemble members
-2. reloads train/val/test splits and normalization metadata
-3. reconstructs expected-value `dPdK` predictions from predicted probabilities
-4. computes RMSE for:
-   - each member
-   - the ensemble mean
-   - a simple PPE baseline
-5. computes both:
-   - global RMSE
-   - land-only RMSE
-6. saves compact outputs for later plotting
+1. loads saved member checkpoints
+2. reloads split and normalization metadata
+3. reconstructs expected-value predictions
+4. computes global and land-only RMSE
+5. filters bad members using NaN/Inf checks plus an IQR outlier rule
+6. writes compact JSON/NPZ outputs
 
-### PPE Baseline
-
-The baseline is the train-mean target field:
+Current hard-coded configuration:
 
 ```text
-ppe_mean_dP = mean_train(dPdK)
+target       = dPdP
+base_channels = 200
+num_bins      = 64
+target range  = [-10, 75]
 ```
 
-This gives a simple “predict the mean field everywhere” benchmark against which
-the neural ensemble is compared.
-
-### Outputs
-
-`post_pr_dpdk.py` writes:
+Outputs:
 
 - `softmax_ensemble_analysis_results.json`
 - `softmax_ensemble_analysis_arrays.npz`
 
 These include:
 
-- file/sample ids
 - train/val/test indices
-- PPE RMSE
-- ensemble RMSE
-- member RMSE
-- land-only variants of the same metrics
-- saved lat weights and land mask in the NPZ bundle
+- member/global/land RMSE arrays
+- retained member indices
+- lat weights and land mask
 
----
+If you want to use this script on a `train_pr_dpdk.py` run, you currently need
+to manually edit:
 
-## CESM2 dPdK Utility
+- run name
+- target file
+- `base_channels`
+- target range
 
-`make_cesm2_dpdK.py` computes `dPdK` for CESM2 PPE members from SST4K forcing experiments.
+### `post_pr_dpdk_cv.py`
 
-### Formula
+Run:
 
-For each member:
-
-```text
-dPR      = future_PR - historical_PR
-global_dT = area-weighted global-mean warming
-dPdK     = dPR / global_dT
+```bash
+python post_pr_dpdk_cv.py
 ```
 
-### Processing Steps
+This is the matched post-analysis for the CV training script. It:
 
-The script:
+- loads each held-out PPE fold
+- computes PPE-baseline and ensemble RMSE
+- filters bad members with the same NaN/Inf + IQR rule
+- writes per-fold `cv_results.json` / `cv_results.npz`
+- writes aggregate `cv_summary.json`
 
-1. loads future precipitation in native CESM2 units
-2. time-means each member
-3. converts units to `mm/yr`
+Current defaults:
+
+```text
+arch        = pyramid
+base_ch     = 20
+num_bins    = 64
+target      = dPdK
+target range = [-700, 1200]
+```
+
+---
+
+## Cross-Validation Training
+
+Run:
+
+```bash
+python train_pr_dpdk_cv.py
+```
+
+This workflow holds out one PPE family at a time:
+
+- `GA7`
+- `GA8`
+- `GA9`
+
+For each fold:
+
+- the held-out PPE is test-only
+- the other two PPEs are split into train/validation
+- normalization and bins are recomputed from the fold training subset
+- an ensemble is trained and saved under `fold_<PPE>`
+
+### Current defaults from `train_pr_dpdk_cv.py`
+
+```text
+ensemble_size = 3
+arch          = pyramid
+base_ch       = 20
+gn_groups     = 1
+k_size        = 3
+pdrop         = 0.0
+num_bins      = 64
+sigma_scale   = 0.6
+batch_train   = 200
+batch_val     = 100
+num_epochs    = 5000
+patience      = 20
+grad_clip     = 1.0
+val_fraction  = 0.2
+optimizer     = RAdam(lr=1e-2, weight_decay=1e-5)
+target range  = [-700, 1200]
+```
+
+Output directory pattern:
+
+```text
+unet_cv_HG789_PR_dPdK_Softmax_unet6R_{arch}_ch{base_ch}_k{k_size}_128x_dPbins{num_bins}_gn{gn_groups}_dpmin{dP_min}_dPmax{dP_max}/fold_{GA7|GA8|GA9}
+```
+
+---
+
+## Notebook Status
+
+### `calibration.ipynb`
+
+This notebook is the current calibration workbench for the `dPdK`, `ch=200`
+analysis run.
+
+It now has three main stages:
+
+1. raw PIT / reliability diagnostics
+2. post-hoc recalibration experiments
+3. global monotone CDF-warp experiments
+
+Saved outputs:
+
+- `temperature_calibration.json`
+- `cdf_warp_calibration.json`
+
+Current takeaway from the notebook workflow:
+
+- symmetric residual width scaling is the useful post-hoc recalibration
+- temperature-only scaling is worse
+- global CDF warping improves PIT centering but hurts RMSE too much
+
+### `maps.ipynb`
+
+The map notebook has been updated to the same `dPdK`, `ch=200` analysis run.
+It currently:
+
+- loads `temperature_calibration.json`
+- applies the validation-fit symmetric scale to uncertainty width
+- optionally filters to `good_members` from `softmax_ensemble_analysis_results.json`
+- prints both global and land-only summary metrics
+- suppresses noisy `shapely` / `cartopy` plotting warnings
+
+This notebook is the main place where the symmetric calibrated uncertainty width
+is actually used downstream.
+
+### `PDFs.ipynb`
+
+This notebook has been simplified. It now focuses on the first figure only and
+compares:
+
+- Gaussian weighting
+- quadratic regression
+- neural network (`ch=200`)
+
+It is a distribution-figure notebook, not a calibration notebook.
+
+### Other notebooks
+
+`gaussian_weighting.ipynb`, `gridpoint_regression.ipynb`, `correlations.ipynb`,
+and `channel_sweep.ipynb` remain exploratory. They are useful for analysis, but
+they are not the most actively maintained entry points in the repo.
+
+---
+
+## CESM2 Utility
+
+Run:
+
+```bash
+python make_cesm2_dpdK.py
+```
+
+What it does:
+
+1. loads CESM2 SST4K future precipitation files
+2. time-means each file
+3. converts native units to `mm/yr`
 4. regrids to the HadGEM `rg128` grid with `xesmf`
-5. computes per-member `dPdK`
-6. saves `CESM2_dPdK_rg128.nc`
+5. computes `dPR = future - historical`
+6. computes area-weighted global mean warming from `CESM2_dT_rg128.nc`
+7. forms `dPdK = dPR / global_dT`
+8. saves `CESM2_dPdK_rg128.nc`
 
-This is useful for external testing or comparing the HadGEM-trained model against
-a second ensemble in a consistent target space.
-
----
-
-## Notebooks
-
-The notebooks are the diagnostics layer of the project rather than core pipeline code.
-They are intended for:
-
-- spatial map generation
-- distribution / PDF checks
-- calibration analysis
-- pointwise regression experiments
-- correlation diagnostics
-
-The exact notebook contents are exploratory and may evolve faster than the core scripts.
+This is separate from the HadGEM training loop, but useful for producing a
+consistent out-of-sample `dPdK` dataset.
 
 ---
 
-## Running The Repo
+## Recommended Usage
 
-Typical workflow:
+### If you want to train a fresh standard HadGEM `dPdK` ensemble
 
 ```bash
 python train_pr_dpdk.py
-python post_pr_dpdk.py
 ```
 
-Cross-validation workflow (leave-one-PPE-out):
+Then either:
+
+- write a matching post script for that exact run, or
+- edit `post_pr_dpdk.py` to point to the same target, architecture, and bin range
+
+### If you want the matched train/post pipeline already present in the repo
 
 ```bash
 python train_pr_dpdk_cv.py
 python post_pr_dpdk_cv.py
 ```
 
-Optional CESM2 preprocessing:
+### If you want the current figure-generation workflow
 
-```bash
-python make_cesm2_dpdK.py
-```
+Use the notebooks, especially:
 
-Then open the notebooks for figures and diagnostics.
+- `calibration.ipynb`
+- `maps.ipynb`
+- `PDFs.ipynb`
+
+Those are currently aligned to the `dPdK`, `ch=200` analysis run, not the
+default `ch=256` training script.
 
 ---
 
 ## Notes And Caveats
 
-- Paths are currently hard-coded to the local workstation layout.
-- The code is written as research scripts, not a packaged CLI tool.
-- Training and post-processing configs must match. If you change:
-  - `base_channels`
-  - `gn_groups`
-  - `kernel_size`
-  - `num_bins`
-  - target bin range
-  then update both scripts accordingly.
-- The output metadata filename is currently `born_bins.json`; that name is kept as-is
+- Paths are hard-coded throughout the repo.
+- This is a research-script repo, not a packaged CLI project.
+- Training, post-processing, and notebooks are not all keyed off one central config.
+- `post_pr_dpdk.py` is currently configured for `dPdP`, despite the repo name and
+  the default training script focusing on `dPdK`.
+- The notebooks are more current than some of the standalone scripts for
+  calibration and uncertainty analysis.
+- The metadata file is still named `born_bins.json`; that spelling is preserved
   because the scripts already depend on it.
-- Some variable names still use legacy `dP_*` naming even though the target is `dPdK`.
-  The README uses `dPdK` terminology consistently, but the code still contains a few
-  older names for bin-range variables.
-- AMP is disabled in the training script by default on MPS because the softmax/log-loss
-  path is more stable in full precision.
+- Several variables still use legacy `dP_*` naming even when the physical target
+  is `dPdK`.
 
 ---
 
 ## Dependencies
 
-The project runs in the `ml` conda environment (Python 3.10). To reproduce it:
+The code has been run in a local `ml` conda environment on Python 3.10.
 
-```bash
-# Create the environment
-conda create -n ml python=3.10 -c conda-forge
+Core packages used across the repo include:
 
-# Core scientific stack (conda)
-conda install -n ml -c conda-forge \
-    numpy=1.26.4 \
-    xarray=2025.4.0 \
-    scipy=1.15.2 \
-    scikit-learn=1.7.2 \
-    matplotlib=3.10.6 \
-    seaborn=0.13.2 \
-    netcdf4=1.7.2 \
-    cftime=1.6.4 \
-    cartopy=0.24.1 \
-    xesmf=0.8.10 \
-    cf_xarray=0.10.6 \
-    dask=2025.9.1 \
-    tqdm=4.67.1
+- `numpy`
+- `xarray`
+- `scikit-learn`
+- `matplotlib`
+- `seaborn`
+- `torch`
+- `netcdf4`
+- `cartopy`
+- `xesmf` for `make_cesm2_dpdK.py`
 
-# PyTorch nightly with MPS support (pip, macOS Apple Silicon)
-# Exact versions used: torch=2.10.0.dev20251008
-conda run -n ml pip install --pre torch torchvision torchaudio \
-    --index-url https://download.pytorch.org/whl/nightly/cpu
-```
-
-`xesmf` is only required for `make_cesm2_dpdK.py`. All other scripts run without it.
+On Apple Silicon, the scripts are written to use `mps` when available.
+`train_pr_dpdk.py` keeps AMP off by default for numerical stability.
