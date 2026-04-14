@@ -21,6 +21,8 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
 
 from unet import ProbUNet
+# from vit import ProbViT as ProbUNet
+
 
 
 device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
@@ -30,16 +32,16 @@ print(f"Using device: {device} | AMP: {use_amp}")
 
 ensemble_size = 10
 base_seed = 42
-base_ch = 256
+base_ch = 64
 gn_groups = 1
 k_size = 3
 pdrop = 0.0
 num_bins = 64
 sigma_scale = 0.6
-batch_train = 34
-batch_val = 20
+batch_train = 60
+batch_val = 60
 num_epochs = 5000
-patience = 35
+patience = 15
 grad_clip = 1.0
 
 dP_min = -700    # -700 dpdk ; -10 dpdp
@@ -49,11 +51,11 @@ random.seed(base_seed)
 np.random.seed(base_seed)
 torch.manual_seed(base_seed)
 
-
 base_model_name = (
     f"unet_ens_HG789_PR_dPdK_Softmax_unet6R_ch{base_ch}_k{k_size}_"
     f"128x_dPbins{num_bins}_gn{gn_groups}_dpmin{dP_min}_dPmax{dP_max}_sigma{sigma_scale}"
 )
+
 weights_dir = "/Users/ewellmeyer/Documents/research/weights"
 ensemble_dir = os.path.join(weights_dir, base_model_name)
 os.makedirs(ensemble_dir, exist_ok=True)
@@ -184,7 +186,7 @@ for member in range(0, ensemble_size):
     random.seed(base_seed + member)
 
     model = ProbUNet(1, base_ch, k_size, pdrop, num_bins, gn_groups=gn_groups).to(device)
-    opt = optim.RAdam(model.parameters(), lr=5e-3)
+    opt = optim.RAdam(model.parameters(), lr=3e-2)
     sch = ReduceLROnPlateau(opt, mode="min", factor=0.5, patience=20)
 
     best_val = float("inf")

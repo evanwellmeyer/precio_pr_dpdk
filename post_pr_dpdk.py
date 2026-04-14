@@ -25,15 +25,16 @@ import torch
 import xarray as xr
 
 from unet import ProbUNet
+# from vit import ProbViT as ProbUNet
 
 
-base_channels = 256
+base_channels = 200
 gn_groups = 1
 kernel_size = 3
 num_bins = 64
 lat_dim = 128
-batch_size = 100          # increase from 10; tune down if MPS OOMs
-outlier_iqr_factor = 3.0  # exclude members whose mean global RMSE > median + N*IQR
+batch_size = 10          # increase from 10; tune down if MPS OOMs
+outlier_iqr_factor = 0  # exclude members whose mean global RMSE > median + N*IQR
 
 dP_min = -700    # -700 dpdk ; -10 dpdp
 dP_max = 1200     # 1200 dpdk ; 75 dpdpp
@@ -43,6 +44,8 @@ ens_name = (
     f"{lat_dim}x_dPbins{num_bins}_gn{gn_groups}_dpmin{dP_min}_dPmax{dP_max}_sigma0.6"
 )
 ens_dir = Path("/Users/ewellmeyer/Documents/research/weights") / ens_name
+
+# ens_dir = Path("/Users/ewellmeyer/Documents/research/weights/direct_pr2dP") / "ens_HG789_PR_dPdK_Softmax_unet6SR_1x_ch128_k3_128x_dPbins64_gn8"
 
 split_ind_path = ens_dir / "data_splits.npz"
 norm_stats_path = ens_dir / "norm_stats.json"
@@ -104,6 +107,52 @@ y_norm = (y - y_mean) / y_std
 N, _, H, W = X.shape
 y_flat = y[:, 0, :, :]  # (N, H, W)
 denom_land = float((landmask * lat_weights[:, None]).sum() + 1e-12)
+global_weights = np.broadcast_to(lat_weights[None, :, None], (N, H, W)).astype(np.float32)
+land_weights = (global_weights * landmask[None]).astype(np.float32)
+
+
+def range_diagnostics(pred, truth, idx, weights, low, high):
+    pred_sub = pred[idx].astype(np.float64)
+    truth_sub = truth[idx].astype(np.float64)
+    w = weights[idx].astype(np.float64)
+
+    in_range = (truth_sub >= low) & (truth_sub <= high)
+    se = (pred_sub - truth_sub) ** 2
+
+    total_weight = float(w.sum())
+    total_se = float((se * w).sum())
+    rmse_all = float(np.sqrt(total_se / (total_weight + 1e-12)))
+
+    w_in = w * in_range
+    in_weight = float(w_in.sum())
+    if in_weight > 0.0:
+        rmse_in_range = float(np.sqrt(float((se * w_in).sum()) / in_weight))
+    else:
+        rmse_in_range = float("nan")
+
+    out_range = ~in_range
+    out_se = float((se * w * out_range).sum())
+    pct_out_se = float(100.0 * out_se / (total_se + 1e-12))
+
+    return {
+        "rmse_all": rmse_all,
+        "rmse_in_range_only": rmse_in_range,
+        "pct_total_se_from_out_of_range": pct_out_se,
+    }
+
+
+def pct_improvement(model_rmse, baseline_rmse):
+    model_rmse = np.asarray(model_rmse, dtype=np.float64)
+    baseline_rmse = np.asarray(baseline_rmse, dtype=np.float64)
+    improvement = (1.0 - model_rmse / (baseline_rmse + 1e-12)) * 100.0
+    improvement = np.where(
+        np.isfinite(model_rmse) & np.isfinite(baseline_rmse),
+        improvement,
+        np.nan,
+    )
+    if improvement.ndim == 0:
+        return float(improvement)
+    return improvement
 
 
 # PPE baseline — fully vectorized, no per-sample loop
@@ -117,6 +166,7 @@ ppe_rmse_per_sample = np.sqrt(se_w_ppe.mean(axis=(1, 2)))
 ppe_rmse_per_sample_land = np.sqrt(
     (se_w_ppe * landmask[None]).sum(axis=(1, 2)) / denom_land
 )
+ppe_pred = np.broadcast_to(ppe_mean_dP[:, 0], y_flat.shape).astype(np.float32)
 
 
 # Load all models up front
@@ -197,9 +247,27 @@ file_ids = np.arange(N)
 print("\n" + "=" * 60)
 print(f"RESULTS ({len(good_idx)}/{n_ens} Members):")
 print("=" * 60)
+range_results = {}
 for split_name, idx in [("Train", train_ind), ("Val", val_ind), ("Test", test_ind)]:
     good_sub = member_rmse_per_sample[np.ix_(good_idx, idx)]
     good_sub_land = member_rmse_per_sample_land[np.ix_(good_idx, idx)]
+    sample_imp_global = pct_improvement(nn_ens_rmse_per_sample[idx], ppe_rmse_per_sample[idx])
+    sample_imp_land = pct_improvement(
+        nn_ens_rmse_per_sample_land[idx], ppe_rmse_per_sample_land[idx]
+    )
+    max_imp_global = float(np.nanmax(sample_imp_global))
+    max_imp_land = float(np.nanmax(sample_imp_land))
+
+    ppe_diag_global = range_diagnostics(ppe_pred, y_flat, idx, global_weights, dP_min, dP_max)
+    ens_diag_global = range_diagnostics(ens_mu, y_flat, idx, global_weights, dP_min, dP_max)
+    ppe_diag_land = range_diagnostics(ppe_pred, y_flat, idx, land_weights, dP_min, dP_max)
+    ens_diag_land = range_diagnostics(ens_mu, y_flat, idx, land_weights, dP_min, dP_max)
+    in_range_imp_global = pct_improvement(
+        ens_diag_global["rmse_in_range_only"], ppe_diag_global["rmse_in_range_only"]
+    )
+    in_range_imp_land = pct_improvement(
+        ens_diag_land["rmse_in_range_only"], ppe_diag_land["rmse_in_range_only"]
+    )
 
     print(f"\n{split_name} Set (Global):")
     print(f"  PPE Mean RMSE:       {ppe_rmse_per_sample[idx].mean():.4f}")
@@ -207,6 +275,21 @@ for split_name, idx in [("Train", train_ind), ("Val", val_ind), ("Test", test_in
     print(f"  Members RMSE:        {good_sub.mean():.4f} ± {good_sub.std():.4f}")
     imp = (1 - nn_ens_rmse_per_sample[idx].mean() / (ppe_rmse_per_sample[idx].mean() + 1e-12)) * 100
     print(f"  Improvement:         {imp:.2f}%")
+    print(f"  Max Improvement:     {max_imp_global:.2f}%")
+    print(f"  Range:               [{dP_min:.0f}, {dP_max:.0f}]")
+    print(
+        "  PPE Range Diag:      "
+        f"RMSE_all={ppe_diag_global['rmse_all']:.4f}  "
+        f"RMSE_in_range_only={ppe_diag_global['rmse_in_range_only']:.4f}  "
+        f"SE_out_of_range={ppe_diag_global['pct_total_se_from_out_of_range']:.2f}%"
+    )
+    print(
+        "  Ens Range Diag:      "
+        f"RMSE_all={ens_diag_global['rmse_all']:.4f}  "
+        f"RMSE_in_range_only={ens_diag_global['rmse_in_range_only']:.4f}  "
+        f"SE_out_of_range={ens_diag_global['pct_total_se_from_out_of_range']:.2f}%"
+    )
+    print(f"  In-Range Improvement:{in_range_imp_global:>11.2f}%")
 
     print(f"\n{split_name} Set (Land Only):")
     print(f"  PPE Mean RMSE:       {ppe_rmse_per_sample_land[idx].mean():.4f}")
@@ -216,6 +299,37 @@ for split_name, idx in [("Train", train_ind), ("Val", val_ind), ("Test", test_in
         1 - nn_ens_rmse_per_sample_land[idx].mean() / (ppe_rmse_per_sample_land[idx].mean() + 1e-12)
     ) * 100
     print(f"  Improvement:         {impL:.2f}%")
+    print(f"  Max Improvement:     {max_imp_land:.2f}%")
+    print(
+        "  PPE Range Diag:      "
+        f"RMSE_all={ppe_diag_land['rmse_all']:.4f}  "
+        f"RMSE_in_range_only={ppe_diag_land['rmse_in_range_only']:.4f}  "
+        f"SE_out_of_range={ppe_diag_land['pct_total_se_from_out_of_range']:.2f}%"
+    )
+    print(
+        "  Ens Range Diag:      "
+        f"RMSE_all={ens_diag_land['rmse_all']:.4f}  "
+        f"RMSE_in_range_only={ens_diag_land['rmse_in_range_only']:.4f}  "
+        f"SE_out_of_range={ens_diag_land['pct_total_se_from_out_of_range']:.2f}%"
+    )
+    print(f"  In-Range Improvement:{in_range_imp_land:>11.2f}%")
+
+    range_results[split_name.lower()] = {
+        "range_low": float(dP_min),
+        "range_high": float(dP_max),
+        "global": {
+            "ppe": ppe_diag_global,
+            "ensemble": ens_diag_global,
+            "max_pct_improvement": max_imp_global,
+            "pct_improvement_in_range_only": in_range_imp_global,
+        },
+        "land_only": {
+            "ppe": ppe_diag_land,
+            "ensemble": ens_diag_land,
+            "max_pct_improvement": max_imp_land,
+            "pct_improvement_in_range_only": in_range_imp_land,
+        },
+    }
 
 
 results = {
@@ -234,6 +348,7 @@ results = {
     "val_indices": val_ind.tolist(),
     "test_indices": test_ind.tolist(),
     "gn_groups": int(gn_groups),
+    "range_diagnostics": range_results,
 }
 with open(ens_dir / "softmax_ensemble_analysis_results.json", "w") as f:
     json.dump(results, f, indent=2)
