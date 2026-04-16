@@ -30,18 +30,18 @@ use_amp = False #torch.backends.mps.is_available()
 print(f"Using device: {device} | AMP: {use_amp}")
 
 
-ensemble_size = 10
+ensemble_size = 3
 base_seed = 42
-base_ch = 64
+base_ch = 8
 gn_groups = 1
 k_size = 3
 pdrop = 0.0
 num_bins = 64
-sigma_scale = 0.6
-batch_train = 60
-batch_val = 60
+sigma_scale = 0.2
+batch_train = 100
+batch_val = 100
 num_epochs = 5000
-patience = 15
+patience = 10
 grad_clip = 1.0
 
 dP_min = -700    # -700 dpdk ; -10 dpdp
@@ -186,7 +186,7 @@ for member in range(0, ensemble_size):
     random.seed(base_seed + member)
 
     model = ProbUNet(1, base_ch, k_size, pdrop, num_bins, gn_groups=gn_groups).to(device)
-    opt = optim.RAdam(model.parameters(), lr=3e-2)
+    opt = optim.RAdam(model.parameters(), lr=3e-1)
     sch = ReduceLROnPlateau(opt, mode="min", factor=0.5, patience=20)
 
     best_val = float("inf")
