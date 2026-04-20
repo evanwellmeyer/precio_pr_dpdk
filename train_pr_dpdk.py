@@ -30,18 +30,18 @@ use_amp = False #torch.backends.mps.is_available()
 print(f"Using device: {device} | AMP: {use_amp}")
 
 
-ensemble_size = 3
+ensemble_size = 10
 base_seed = 42
-base_ch = 8
+base_ch = 32
 gn_groups = 1
 k_size = 3
-pdrop = 0.0
+pdrop = 0.05
 num_bins = 64
-sigma_scale = 0.2
-batch_train = 100
-batch_val = 100
+sigma_scale = 0.6
+batch_train = 40
+batch_val = 40
 num_epochs = 5000
-patience = 10
+patience = 20
 grad_clip = 1.0
 
 dP_min = -700    # -700 dpdk ; -10 dpdp
@@ -53,7 +53,7 @@ torch.manual_seed(base_seed)
 
 base_model_name = (
     f"unet_ens_HG789_PR_dPdK_Softmax_unet6R_ch{base_ch}_k{k_size}_"
-    f"128x_dPbins{num_bins}_gn{gn_groups}_dpmin{dP_min}_dPmax{dP_max}_sigma{sigma_scale}"
+    f"128x_dPbins{num_bins}_gn{gn_groups}_dpmin{dP_min}_dPmax{dP_max}_sigma{sigma_scale}_dr{pdrop}"
 )
 
 weights_dir = "/Users/ewellmeyer/Documents/research/weights"
@@ -186,8 +186,8 @@ for member in range(0, ensemble_size):
     random.seed(base_seed + member)
 
     model = ProbUNet(1, base_ch, k_size, pdrop, num_bins, gn_groups=gn_groups).to(device)
-    opt = optim.RAdam(model.parameters(), lr=3e-1)
-    sch = ReduceLROnPlateau(opt, mode="min", factor=0.5, patience=20)
+    opt = optim.RAdam(model.parameters(), lr=1e-3)
+    sch = ReduceLROnPlateau(opt, mode="min", factor=0.5, patience=10)
 
     best_val = float("inf")
     if os.path.exists(best_path):
