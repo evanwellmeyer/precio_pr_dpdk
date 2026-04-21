@@ -28,7 +28,7 @@ from unet import ProbUNet
 # from vit import ProbViT as ProbUNet
 
 
-base_channels = 256
+base_channels = 32
 gn_groups = 1
 kernel_size = 3
 num_bins = 64
