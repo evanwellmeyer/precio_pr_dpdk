@@ -28,12 +28,12 @@ from unet import ProbUNet
 # from vit import ProbViT as ProbUNet
 
 
-base_channels = 64
+base_channels = 256
 gn_groups = 1
 kernel_size = 3
 num_bins = 64
 lat_dim = 128
-batch_size = 40          # increase from 10; tune down if MPS OOMs
+batch_size = 10          # increase from 10; tune down if MPS OOMs
 outlier_iqr_factor = 0  # exclude members whose mean global RMSE > median + N*IQR
 
 dP_min = -700    # -700 dpdk ; -10 dpdp
@@ -41,7 +41,7 @@ dP_max = 1200     # 1200 dpdk ; 75 dpdpp
 
 ens_name = (
     f"unet_ens_HG789_PR_dPdK_Softmax_unet6R_ch{base_channels}_k{kernel_size}_"
-    f"{lat_dim}x_dPbins{num_bins}_gn{gn_groups}_dpmin{dP_min}_dPmax{dP_max}_sigma0.6"
+    f"{lat_dim}x_dPbins{num_bins}_gn{gn_groups}_dpmin{dP_min}_dPmax{dP_max}_sigma0.6_dr0.1"
 )
 ens_dir = Path("/Users/ewellmeyer/Documents/research/weights") / ens_name
 
