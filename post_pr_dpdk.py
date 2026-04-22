@@ -34,7 +34,7 @@ kernel_size = 3
 num_bins = 64
 lat_dim = 128
 batch_size = 60          # increase from 10; tune down if MPS OOMs
-outlier_iqr_factor = 0  # exclude members whose mean global RMSE > median + N*IQR
+outlier_iqr_factor = 5  # exclude members whose mean global RMSE > median + N*IQR
 
 dP_min = -700    # -700 dpdk ; -10 dpdp
 dP_max = 1200     # 1200 dpdk ; 75 dpdpp
