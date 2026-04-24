@@ -5,16 +5,11 @@ historical precipitation climatology. The core model predicts a full per-pixel
 distribution over a discretized target axis instead of a single deterministic
 field.
 
-This repo currently contains three related but not perfectly identical tracks:
+This repo currently contains three related tracks:
 
 1. a standard HadGEM `PR -> dPdK` ensemble training script
 2. a matched leave-one-PPE-out `PR -> dPdK` cross-validation pipeline
-3. analysis notebooks centered on an existing `dPdK` run with `ch=200`
-
-The most important caveat is that `train_pr_dpdk.py` and `post_pr_dpdk.py` are
-not currently a drop-in matched pair: the training script is configured for
-`dPdK`, while `post_pr_dpdk.py` is currently hard-coded for a separate `dPdP`
-run.
+3. analysis notebooks centered on the current manuscript `dPdK` run with `ch=128`
 
 ---
 
@@ -31,7 +26,7 @@ run.
 | File | Role | Current default target |
 |------|------|------------------------|
 | `train_pr_dpdk.py` | Standard HadGEM ensemble training | `dPdK` |
-| `post_pr_dpdk.py` | Standalone post-analysis for a saved ensemble | `dPdP` |
+| `post_pr_dpdk.py` | Standalone post-analysis for a saved ensemble | `dPdK` |
 
 ### Cross-validation workflow
 
@@ -78,33 +73,20 @@ The model now lives in `unet.py` and is imported by the scripts and notebooks.
 HadGEM `PR -> dPdK` with:
 
 - flat `Unet6R`
-- `base_ch = 256`
+- `base_ch = 128`
 - `num_bins = 64`
 - target range `[-700, 1200] mm/yr/K`
-- `RAdam(lr=1e-4, weight_decay=1e-5)`
+- `RAdam(lr=1e-3)`
 - AMP disabled on MPS (`use_amp = False`)
-
-Important operational note: the member loop currently starts at:
-
-```python
-for member in range(5, ensemble_size):
-```
-
-so the script, as written, only trains members `5..9`. That looks intentional
-for resuming a partially completed run, but it is not a full fresh 10-member
-loop unless you edit it.
 
 ### 3. Standard post-analysis script
 
-`post_pr_dpdk.py` is currently configured for a different saved experiment:
+`post_pr_dpdk.py` is currently configured for the manuscript standard ensemble:
 
-- target file: `GA789_dPdP_rg128.nc`
-- run name contains `dPdP`
-- `base_channels = 200`
-- target range `[-10, 75]`
-
-So despite the filename, it is not currently the default post-processing partner
-for `train_pr_dpdk.py`.
+- target file: `GA789_dPdK_rg128.nc`
+- run name contains `dPdK`
+- `base_channels = 128`
+- target range `[-700, 1200]`
 
 ### 4. Cross-validation pipeline
 
@@ -122,15 +104,12 @@ This workflow uses:
 
 ### 5. Notebook analysis state
 
-The updated notebooks are centered on an existing `dPdK` run with:
+The updated notebooks are centered on the manuscript `dPdK` run with:
 
-- `base_channels = 200`
+- `base_channels = 128`
 - `num_bins = 64`
 - `gn_groups = 1`
 - target range `[-700, 1200]`
-
-Those notebooks are analysis artifacts for that run; they are not automatically
-synced to the current `train_pr_dpdk.py` default of `base_ch = 256`.
 
 ---
 
@@ -258,33 +237,33 @@ python train_pr_dpdk.py
 ```text
 ensemble_size = 10
 base_seed     = 42
-base_ch       = 256
+base_ch       = 128
 gn_groups     = 1
 k_size        = 3
-pdrop         = 0.0
+pdrop         = 0.1
 num_bins      = 64
 sigma_scale   = 0.6
-batch_train   = 20
-batch_val     = 20
+batch_train   = 40
+batch_val     = 40
 num_epochs    = 5000
-patience      = 15
+patience      = 20
 grad_clip     = 1.0
-optimizer     = RAdam(lr=1e-4, weight_decay=1e-5)
+optimizer     = RAdam(lr=1e-3)
 target range  = [-700, 1200]
 AMP           = False
-member loop   = range(5, ensemble_size)
+member loop   = range(0, ensemble_size)
 ```
 
 ### Output directory pattern
 
 ```text
-unet_ens_HG789_PR_dPdK_Softmax_unet6R_ch{base_ch}_k{k_size}_128x_dPbins{num_bins}_gn{gn_groups}_dpmin{dP_min}_dPmax{dP_max}
+unet_ens_HG789_PR_dPdK_Softmax_unet6R_ch{base_ch}_k{k_size}_128x_dPbins{num_bins}_gn{gn_groups}_dpmin{dP_min}_dPmax{dP_max}_sigma{sigma_scale}_dr{pdrop}
 ```
 
 Example with current defaults:
 
 ```text
-unet_ens_HG789_PR_dPdK_Softmax_unet6R_ch256_k3_128x_dPbins64_gn1_dpmin-700_dPmax1200
+unet_ens_HG789_PR_dPdK_Softmax_unet6R_ch128_k3_128x_dPbins64_gn1_dpmin-700_dPmax1200_sigma0.6_dr0.1
 ```
 
 Saved artifacts:
@@ -319,10 +298,10 @@ What it does:
 Current hard-coded configuration:
 
 ```text
-target       = dPdP
-base_channels = 200
+target       = dPdK
+base_channels = 128
 num_bins      = 64
-target range  = [-10, 75]
+target range  = [-700, 1200]
 ```
 
 Outputs:
@@ -337,13 +316,8 @@ These include:
 - retained member indices
 - lat weights and land mask
 
-If you want to use this script on a `train_pr_dpdk.py` run, you currently need
-to manually edit:
-
-- run name
-- target file
-- `base_channels`
-- target range
+The model is instantiated with dropout disabled for evaluation, but the run name
+points to the `dr0.1` training ensemble.
 
 ### `post_pr_dpdk_cv.py`
 
@@ -427,7 +401,7 @@ unet_cv_HG789_PR_dPdK_Softmax_unet6R_{arch}_ch{base_ch}_k{k_size}_128x_dPbins{nu
 
 ### `calibration.ipynb`
 
-This notebook is the current calibration workbench for the `dPdK`, `ch=200`
+This notebook is the current calibration workbench for the `dPdK`, `ch=128`
 analysis run.
 
 It now has three main stages:
@@ -449,7 +423,7 @@ Current takeaway from the notebook workflow:
 
 ### `maps.ipynb`
 
-The map notebook has been updated to the same `dPdK`, `ch=200` analysis run.
+The map notebook has been updated to the same `dPdK`, `ch=128` analysis run.
 It currently:
 
 - loads `temperature_calibration.json`
@@ -468,7 +442,7 @@ compares:
 
 - Gaussian weighting
 - quadratic regression
-- neural network (`ch=200`)
+- neural network (`ch=128`)
 
 It is a distribution-figure notebook, not a calibration notebook.
 
@@ -532,8 +506,8 @@ Use the notebooks, especially:
 - `maps.ipynb`
 - `PDFs.ipynb`
 
-Those are currently aligned to the `dPdK`, `ch=200` analysis run, not the
-default `ch=256` training script.
+Those are currently aligned to the `dPdK`, `ch=128` analysis run and the
+standard post-analysis script.
 
 ---
 
@@ -542,10 +516,11 @@ default `ch=256` training script.
 - Paths are hard-coded throughout the repo.
 - This is a research-script repo, not a packaged CLI project.
 - Training, post-processing, and notebooks are not all keyed off one central config.
-- `post_pr_dpdk.py` is currently configured for `dPdP`, despite the repo name and
-  the default training script focusing on `dPdK`.
-- The notebooks are more current than some of the standalone scripts for
-  calibration and uncertainty analysis.
+- `gaussian_weighting.ipynb` and `gridpoint_regression.ipynb` are configured to
+  use the NN 70/10/20 test split, with the NN validation members folded into
+  baseline training.
+- Some notebooks still contain saved output from earlier exploratory runs and
+  should be rerun before using their displayed values as final numbers.
 - The metadata file is still named `born_bins.json`; that spelling is preserved
   because the scripts already depend on it.
 - Several variables still use legacy `dP_*` naming even when the physical target

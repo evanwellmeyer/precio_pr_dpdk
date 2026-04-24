@@ -1,6 +1,21 @@
 amip_dpdp.ipynb
 __pycache__/
+AMS LaTeX Package V6.1/*
+!AMS LaTeX Package V6.1/
+!AMS LaTeX Package V6.1/ametsocV6.1.cls
+!AMS LaTeX Package V6.1/ametsocV6.bst
+!AMS LaTeX Package V6.1/precip_aies_manuscript.tex
+!AMS LaTeX Package V6.1/precip_aies_supplement.tex
+!AMS LaTeX Package V6.1/references_precip.bib
+!AMS LaTeX Package V6.1/figures/
+!AMS LaTeX Package V6.1/figures/*.png
+!AMS LaTeX Package V6.1/supp_figures/
+AMS LaTeX Package V6.1/supp_figures/*
+!AMS LaTeX Package V6.1/supp_figures/figS1.png
+!AMS LaTeX Package V6.1/supp_figures/figS2.png
+!AMS LaTeX Package V6.1/supp_figures/figS3_1.png
+!AMS LaTeX Package V6.1/supp_figures/figS3_2.png
+/figures/
+.DS_Store
+.DS_Store
 AMS LaTeX Package V6.1/
-figures/
-.DS_Store
-.DS_Store

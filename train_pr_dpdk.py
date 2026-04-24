@@ -32,10 +32,10 @@ print(f"Using device: {device} | AMP: {use_amp}")
 
 ensemble_size = 10
 base_seed = 42
-base_ch = 32
+base_ch = 128
 gn_groups = 1
 k_size = 3
-pdrop = 0.05
+pdrop = 0.1
 num_bins = 64
 sigma_scale = 0.6
 batch_train = 40
