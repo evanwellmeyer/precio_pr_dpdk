@@ -441,10 +441,11 @@ This notebook has been simplified. It now focuses on the first figure only and
 compares:
 
 - Gaussian weighting
-- quadratic regression
+- gridpoint polynomial regression
 - neural network (`ch=128`)
 
-It is a distribution-figure notebook, not a calibration notebook.
+It is a distribution-figure notebook, not a calibration notebook. It is now
+configured to use the shared 304-member NN test split for all three methods.
 
 ### Other notebooks
 
@@ -511,6 +512,49 @@ standard post-analysis script.
 
 ---
 
+## Manuscript To Do
+
+Current AIES manuscript state:
+
+- The main Fig. 2 workflow has been rerun on the shared 304-member test split.
+- Fig. 2 has been visually checked and looks good.
+- Supplemental baseline figures Fig. S2, Fig. S3.1, and Fig. S3.2 have been
+  updated.
+- Gridpoint regression and Gaussian weighting now use the NN test members as
+  held-out test data and fold the NN validation members into baseline training.
+- `AMS LaTeX Package V6.1/figures/fig2.png` has been refreshed from the rerun
+  baseline/PDF workflow.
+- The Fig. 2 gridpoint baseline is the third-order polynomial regression. The
+  manuscript now states this and notes that it is shown because it is the
+  strongest tested local polynomial baseline.
+- Fig. 5 seed diagnostics have been checked for the dropout 0.1 64-channel,
+  128-channel, and 256-channel runs. The diagnostic figure was saved to
+  `AMS LaTeX Package V6.1/figures/fig5_seed_diagnostics.png`.
+- The 128-channel run remains the practical choice: it has the best checked
+  global, land-only, and in-range RMSE diagnostics. The 64-channel run is close
+  but not better overall, and the 256-channel run does not show larger
+  retained-seed spread or any meaningful secondary-metric gain. Keep Fig. 5
+  simple.
+- A cleaner seed-spread version of the channel sweep has been added to the
+  supplement as Fig. S4 (`AMS LaTeX Package V6.1/supp_figures/figS4.png`),
+  showing all three dropout settings and individual seed results.
+
+Remaining items before submission:
+
+- Do not rerun leave-one-PPE-out CV unless an advisor or reviewer specifically
+  asks for a final-configuration generalization test. The current manuscript
+  frames the existing CV as a diagnostic stress test, not as the source of the
+  headline skill values.
+- If CV does need to be rerun, run the final flat 128-channel, 10-seed setup
+  first. Only run the pyramid architecture too if the paper is going to make an
+  explicit architecture-robustness claim.
+- Do one final pass on the promoted Fig. 5/Fig. 6 material for narrative flow
+  now that those diagnostics are in the main text.
+- Add a GitHub release or archive DOI only if desired for final submission;
+  the current text cites the public GitHub repository.
+
+---
+
 ## Notes And Caveats
 
 - Paths are hard-coded throughout the repo.
@@ -519,7 +563,7 @@ standard post-analysis script.
 - `gaussian_weighting.ipynb` and `gridpoint_regression.ipynb` are configured to
   use the NN 70/10/20 test split, with the NN validation members folded into
   baseline training.
-- Some notebooks still contain saved output from earlier exploratory runs and
+- Some exploratory notebooks may still contain saved output from earlier runs and
   should be rerun before using their displayed values as final numbers.
 - The metadata file is still named `born_bins.json`; that spelling is preserved
   because the scripts already depend on it.
