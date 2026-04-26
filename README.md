@@ -527,13 +527,13 @@ Current AIES manuscript state:
 - The Fig. 2 gridpoint baseline is the third-order polynomial regression. The
   manuscript now states this and notes that it is shown because it is the
   strongest tested local polynomial baseline.
-- Fig. 5 seed diagnostics have been checked for the dropout 0.1 64-channel,
+- Fig. 3 seed diagnostics have been checked for the dropout 0.1 64-channel,
   128-channel, and 256-channel runs. The diagnostic figure was saved to
-  `AMS LaTeX Package V6.1/figures/fig5_seed_diagnostics.png`.
+  `AMS LaTeX Package V6.1/figures/channel_sweep_seed_diagnostics.png`.
 - The 128-channel run remains the practical choice: it has the best checked
   global, land-only, and in-range RMSE diagnostics. The 64-channel run is close
   but not better overall, and the 256-channel run does not show larger
-  retained-seed spread or any meaningful secondary-metric gain. Keep Fig. 5
+  retained-seed spread or any meaningful secondary-metric gain. Keep Fig. 3
   simple.
 - A cleaner seed-spread version of the channel sweep has been added to the
   supplement as Fig. S4 (`AMS LaTeX Package V6.1/supp_figures/figS4.png`),
@@ -548,8 +548,8 @@ Remaining items before submission:
 - If CV does need to be rerun, run the final flat 128-channel, 10-seed setup
   first. Only run the pyramid architecture too if the paper is going to make an
   explicit architecture-robustness claim.
-- Do one final pass on the promoted Fig. 5/Fig. 6 material for narrative flow
-  now that those diagnostics are in the main text.
+- Do one final pass on the promoted channel-sweep and archive-comparison
+  material for narrative flow now that those diagnostics are in the main text.
 - Add a GitHub release or archive DOI only if desired for final submission;
   the current text cites the public GitHub repository.
 
