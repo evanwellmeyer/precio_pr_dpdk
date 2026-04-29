@@ -535,9 +535,10 @@ Current AIES manuscript state:
   but not better overall, and the 256-channel run does not show larger
   retained-seed spread or any meaningful secondary-metric gain. Keep Fig. 3
   simple.
-- A cleaner seed-spread version of the channel sweep has been added to the
-  supplement as Fig. S4 (`AMS LaTeX Package V6.1/supp_figures/figS4.png`),
-  showing all three dropout settings and individual seed results.
+- A cleaner seed-spread version of the channel sweep has been moved into the
+  manuscript appendix as Fig. A1 (`AMS LaTeX Package V6.1/figures/figA1.png`),
+  showing all three dropout settings and individual seed results. Fig. S4 is
+  reserved for the leave-one-PPE-out cross-validation distributions.
 
 Remaining items before submission:
 
