@@ -9,13 +9,14 @@ AMS LaTeX Package V6.1/*
 !AMS LaTeX Package V6.1/references_precip.bib
 !AMS LaTeX Package V6.1/figures/
 !AMS LaTeX Package V6.1/figures/*.png
+AMS LaTeX Package V6.1/figures/channel_sweep_seed_diagnostics.png
 !AMS LaTeX Package V6.1/supp_figures/
 AMS LaTeX Package V6.1/supp_figures/*
 !AMS LaTeX Package V6.1/supp_figures/figS1.png
 !AMS LaTeX Package V6.1/supp_figures/figS2.png
 !AMS LaTeX Package V6.1/supp_figures/figS3_1.png
 !AMS LaTeX Package V6.1/supp_figures/figS3_2.png
+!AMS LaTeX Package V6.1/supp_figures/figS4.png
 /figures/
 .DS_Store
 .DS_Store
-AMS LaTeX Package V6.1/
