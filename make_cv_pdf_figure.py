@@ -118,7 +118,7 @@ def main():
     palette = {
         "GA7": "#E69F00",
         "GA8": "#56B4E9",
-        "GA9": sns.color_palette("viridis", n_colors=1)[0],
+        "GA9": "#009E73",
     }
 
     summary = (
