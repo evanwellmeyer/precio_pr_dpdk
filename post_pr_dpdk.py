@@ -5,7 +5,7 @@ HadGEM post-analysis for Softmax NN (simple + memory-lean)
 - Loads splits, normalization, bin metadata (uniform centers in normalized dP)
 - Computes PPE baseline (mean over TRAIN dP targets)
 - Evaluates RMSEs and saves compact arrays
-- Filters bad ensemble members (NaN/Inf or IQR outlier)
+- Filters bad ensemble members using validation-set NaN/Inf or IQR outliers
 
 Speed notes:
 - All models loaded up front; single data pass (batch outer, members inner)
@@ -28,20 +28,20 @@ from unet import ProbUNet
 # from vit import ProbViT as ProbUNet
 
 
-base_channels = 128
+base_channels = 64
 gn_groups = 1
 kernel_size = 3
 num_bins = 64
 lat_dim = 128
-batch_size = 60          # increase from 10; tune down if MPS OOMs
-outlier_iqr_factor = 0  # exclude members whose mean global RMSE > median + N*IQR
+batch_size = 64          # increase from 10; tune down if MPS OOMs
+outlier_iqr_factor = 3  # exclude members whose validation mean global RMSE > median + N*IQR
 
 dP_min = -700    # -700 dpdk ; -10 dpdp
 dP_max = 1200     # 1200 dpdk ; 75 dpdpp
 
 ens_name = (
     f"unet_ens_HG789_PR_dPdK_Softmax_unet6R_ch{base_channels}_k{kernel_size}_"
-    f"{lat_dim}x_dPbins{num_bins}_gn{gn_groups}_dpmin{dP_min}_dPmax{dP_max}_sigma0.6_dr0.1"
+    f"{lat_dim}x_dPbins{num_bins}_gn{gn_groups}_dpmin{dP_min}_dPmax{dP_max}_sigma0.6"
 )
 ens_dir = Path("/Users/ewellmeyer/Documents/research/weights") / ens_name
 
@@ -213,24 +213,29 @@ member_rmse_per_sample_land = np.sqrt(
 )
 
 
-# Member filtering: exclude NaN/Inf and IQR outliers
-member_global_rmse = member_rmse_per_sample.mean(axis=1)       # (n_ens,)
-nan_bad = ~np.isfinite(member_global_rmse)
-med = np.nanmedian(member_global_rmse)
-iqr = np.nanpercentile(member_global_rmse, 75) - np.nanpercentile(member_global_rmse, 25)
-outlier_bad = member_global_rmse > med + outlier_iqr_factor * iqr
+# Member filtering: exclude NaN/Inf and IQR outliers using validation samples only.
+filter_idx = val_ind
+member_filter_rmse = member_rmse_per_sample[:, filter_idx].mean(axis=1)  # (n_ens,)
+nan_bad = ~np.isfinite(member_filter_rmse)
+med = np.nanmedian(member_filter_rmse)
+iqr = np.nanpercentile(member_filter_rmse, 75) - np.nanpercentile(member_filter_rmse, 25)
+filter_threshold = med + outlier_iqr_factor * iqr
+outlier_bad = member_filter_rmse > filter_threshold
 bad = nan_bad | outlier_bad
 good_idx = np.where(~bad)[0]
 
-print(f"\nMember filtering: {len(good_idx)}/{n_ens} members retained")
+print(f"\nMember filtering on validation set: {len(good_idx)}/{n_ens} members retained")
+print(f"  Validation RMSE threshold: {filter_threshold:.4f}")
 if bad.any():
     for excl in np.where(bad)[0]:
         tags = []
         if nan_bad[excl]:
             tags.append("NaN/Inf")
         if outlier_bad[excl]:
-            tags.append(f"outlier RMSE={member_global_rmse[excl]:.2f}")
+            tags.append(f"validation outlier RMSE={member_filter_rmse[excl]:.2f}")
         print(f"  Excluded member {excl}: {', '.join(tags)}")
+if len(good_idx) == 0:
+    raise RuntimeError("Member filtering removed every ensemble member.")
 
 
 # Ensemble predictions from good members only
@@ -344,6 +349,16 @@ results = {
     "rmse_softmax_members_land": member_rmse_per_sample_land.tolist(),
     "n_ensemble_members": int(n_ens),
     "n_good_members": int(len(good_idx)),
+    "member_filtering": {
+        "split": "validation",
+        "index_key": "val_indices",
+        "rmse_basis": "mean_global_rmse",
+        "outlier_iqr_factor": float(outlier_iqr_factor),
+        "median_rmse": float(med),
+        "iqr_rmse": float(iqr),
+        "threshold_rmse": float(filter_threshold),
+        "member_rmse": member_filter_rmse.tolist(),
+    },
     "train_indices": train_ind.tolist(),
     "val_indices": val_ind.tolist(),
     "test_indices": test_ind.tolist(),
@@ -363,6 +378,11 @@ np.savez_compressed(
     rmse_ppe_land=ppe_rmse_per_sample_land,
     rmse_softmax_mean_land=nn_ens_rmse_per_sample_land,
     rmse_softmax_members_land=member_rmse_per_sample_land,
+    member_filter_rmse=member_filter_rmse,
+    member_filter_threshold=np.float32(filter_threshold),
+    member_filter_median=np.float32(med),
+    member_filter_iqr=np.float32(iqr),
+    member_filter_indices=filter_idx,
     lat_weights=lat_weights.astype(np.float32),
     landmask=landmask,
     bin_centers=bin_centers.astype(np.float32),
