@@ -527,18 +527,16 @@ Current AIES manuscript state:
 - The Fig. 2 gridpoint baseline is the third-order polynomial regression. The
   manuscript now states this and notes that it is shown because it is the
   strongest tested local polynomial baseline.
-- Fig. 3 seed diagnostics have been checked for the dropout 0.1 64-channel,
-  128-channel, and 256-channel runs. The diagnostic figure was saved to
-  `AMS LaTeX Package V6.1/figures/channel_sweep_seed_diagnostics.png`.
-- The 128-channel run remains the practical choice: it has the best checked
-  global, land-only, and in-range RMSE diagnostics. The 64-channel run is close
-  but not better overall, and the 256-channel run does not show larger
-  retained-seed spread or any meaningful secondary-metric gain. Keep Fig. 3
-  simple.
-- A cleaner seed-spread version of the channel sweep has been moved into the
-  manuscript appendix as Fig. A1 (`AMS LaTeX Package V6.1/figures/figA1.png`),
-  showing all three dropout settings and individual seed results. Fig. S4 is
-  reserved for the leave-one-PPE-out cross-validation distributions.
+- Fig. 3 now includes both the ensemble-mean channel sweep and the individual
+  seed results for the no-dropout and 0.1-dropout runs. The ensemble-mean
+  prediction consistently outperforms the retained individual seeds across the
+  displayed sweep, supporting the use of seed averaging in the headline model.
+- The 128-channel run remains the adopted configuration because it lies on the
+  high-capacity skill plateau and has the strongest land-only result among the
+  0.1-dropout runs. The 64-channel 0.1-dropout run is slightly higher globally,
+  while the 256-channel run provides no systematic gain despite the added
+  computational cost.
+- Fig. S4 is reserved for the leave-one-PPE-out cross-validation distributions.
 
 Remaining items before submission:
 

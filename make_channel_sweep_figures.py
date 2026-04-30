@@ -11,8 +11,7 @@ OUT_DIR = Path("AMS LaTeX Package V6.1/figures")
 CHANNELS = [8, 16, 32, 64, 128, 256]
 DROP_FORMATS = [
     {"suffix": "", "label": "0", "color": "#3B73B9", "marker": "o"},
-    {"suffix": "_dr0.05", "label": "0.05", "color": "#D77927", "marker": "s"},
-    {"suffix": "_dr0.1", "label": "0.10", "color": "#2A9D55", "marker": "^"},
+    {"suffix": "_dr0.1", "label": "0.10", "color": "#D77927", "marker": "s"},
 ]
 
 RUN_TEMPLATE = (
@@ -70,8 +69,8 @@ def configure_axis(ax, ylabel=None):
     ax.set_xticks(CHANNELS)
     ax.set_xticklabels([str(ch) for ch in CHANNELS])
     ax.set_xlim(7, 285)
-    ax.set_ylim(8, 30)
-    ax.set_yticks([8, 12, 16, 20, 24, 28])
+    ax.set_ylim(0, 30)
+    ax.set_yticks([0, 5, 10, 15, 20, 25, 30])
     ax.set_xlabel("Base channel width")
     if ylabel:
         ax.set_ylabel(ylabel)
@@ -92,31 +91,55 @@ def make_main_figure(records):
         "legend.title_fontsize": 8.0,
     })
 
-    fig, axes = plt.subplots(1, 2, figsize=(7.2, 3.35), sharey=True)
+    fig, axes = plt.subplots(1, 2, figsize=(7.5, 3.55), sharey=True)
+    offsets = {"": -0.035, "_dr0.1": 0.035}
+    seed_jitter = np.linspace(-0.015, 0.015, 10)
     panel_specs = [
-        (axes[0], "ens_global", "Global"),
-        (axes[1], "ens_land", "Land only"),
+        (axes[0], "seed_global", "ens_global", "Global"),
+        (axes[1], "seed_land", "ens_land", "Land only"),
     ]
 
-    for ax, key, title in panel_specs:
+    for ax, seed_key, ens_key, title in panel_specs:
         for cfg in DROP_FORMATS:
-            vals = [records[cfg["suffix"]][ch][key] for ch in CHANNELS]
+            xs = []
+            vals = []
+            suffix = cfg["suffix"]
+            for ch in CHANNELS:
+                rec = records[suffix][ch]
+                x_line = ch * (2 ** offsets[suffix])
+                xs.append(x_line)
+                vals.append(rec[ens_key])
+                for i, val in enumerate(rec[seed_key]):
+                    jitter = seed_jitter[i] if i < len(seed_jitter) else 0.0
+                    retained = i in rec["good"]
+                    ax.scatter(
+                        ch * (2 ** (offsets[suffix] + jitter)),
+                        val,
+                        s=15,
+                        marker=cfg["marker"],
+                        facecolor=cfg["color"] if retained else "white",
+                        edgecolor=cfg["color"],
+                        linewidth=0.65,
+                        alpha=0.33 if retained else 0.85,
+                        zorder=2,
+                    )
+
             ax.plot(
-                CHANNELS,
+                xs,
                 vals,
                 color=cfg["color"],
                 marker=cfg["marker"],
                 label=cfg["label"],
-                linewidth=1.9,
-                markersize=4.8,
+                linewidth=2.0,
+                markersize=5.7,
                 markeredgewidth=0.7,
                 solid_capstyle="round",
-                zorder=3,
+                zorder=4,
             )
 
-        adopted = records["_dr0.1"][128][key]
+        adopted = records["_dr0.1"][128][ens_key]
         ax.scatter(
-            [128],
+            [128 * (2 ** offsets["_dr0.1"])],
             [adopted],
             s=50,
             marker="^",
@@ -127,91 +150,17 @@ def make_main_figure(records):
         )
 
         ax.set_title(title, pad=5)
-        configure_axis(ax, "Median RMSE improvement (%)" if ax is axes[0] else None)
+        configure_axis(ax, "Median per-member RMSE improvement (%)" if ax is axes[0] else None)
 
-    legend = axes[1].legend(
-        title="Dropout",
-        frameon=False,
-        loc="lower right",
-        handlelength=1.8,
-        borderaxespad=0.35,
-        labelspacing=0.45,
-    )
-    legend._legend_box.align = "left"
-
-    fig.tight_layout(pad=0.45, w_pad=1.0)
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-    out_path = OUT_DIR / "fig3.png"
-    fig.savefig(out_path, dpi=350, bbox_inches="tight")
-    plt.close(fig)
-    return out_path
-
-
-def make_seed_figure(records):
-    plt.rcParams.update({
-        "font.size": 9.0,
-        "axes.labelsize": 10.0,
-        "xtick.labelsize": 9.0,
-        "ytick.labelsize": 9.0,
-        "legend.fontsize": 8.5,
-    })
-
-    fig, axes = plt.subplots(1, 2, figsize=(7.5, 3.55), sharey=True)
-    offsets = {"": -0.055, "_dr0.05": 0.0, "_dr0.1": 0.055}
-    seed_jitter = np.linspace(-0.015, 0.015, 10)
-
-    panel_specs = [
-        (axes[0], "seed_global", "ens_global", "Global"),
-        (axes[1], "seed_land", "ens_land", "Land only"),
-    ]
-
-    for ax, seed_key, ens_key, title in panel_specs:
-        for cfg in DROP_FORMATS:
-            xs = []
-            ys = []
-            suffix = cfg["suffix"]
-            for ch in CHANNELS:
-                rec = records[suffix][ch]
-                x_line = ch * (2 ** offsets[suffix])
-                xs.append(x_line)
-                ys.append(rec[ens_key])
-                for i, val in enumerate(rec[seed_key]):
-                    jitter = seed_jitter[i] if i < len(seed_jitter) else 0.0
-                    retained = i in rec["good"]
-                    ax.scatter(
-                        ch * (2 ** (offsets[suffix] + jitter)),
-                        val,
-                        s=18,
-                        marker=cfg["marker"],
-                        facecolor=cfg["color"] if retained else "white",
-                        edgecolor=cfg["color"],
-                        linewidth=0.8,
-                        alpha=0.38 if retained else 0.85,
-                        zorder=2,
-                    )
-            ax.plot(
-                xs,
-                ys,
-                color=cfg["color"],
-                marker=cfg["marker"],
-                linewidth=2.0,
-                markersize=5.8,
-                label=f"Dropout {cfg['label']}",
-                zorder=4,
-            )
-
-        ax.set_title(title, pad=5)
-        configure_axis(ax, "Median per-member improvement (%)" if ax is axes[0] else None)
-
-    line_handles = [
+    dropout_handles = [
         Line2D(
             [0],
             [0],
             color=cfg["color"],
             marker=cfg["marker"],
             lw=2.0,
-            ms=5.8,
-            label=f"Dropout {cfg['label']}",
+            ms=5.7,
+            label=cfg["label"],
         )
         for cfg in DROP_FORMATS
     ]
@@ -219,11 +168,20 @@ def make_seed_figure(records):
         Line2D(
             [0],
             [0],
+            color="0.25",
+            marker="o",
+            lw=2.0,
+            ms=5.7,
+            label="ensemble mean",
+        ),
+        Line2D(
+            [0],
+            [0],
             marker="o",
             color="0.25",
             markerfacecolor="0.25",
             linestyle="None",
-            ms=5,
+            ms=4.8,
             label="retained seed",
         ),
         Line2D(
@@ -233,18 +191,32 @@ def make_seed_figure(records):
             color="0.25",
             markerfacecolor="white",
             linestyle="None",
-            ms=5,
+            ms=4.8,
             label="filtered seed",
         ),
     ]
 
-    leg1 = axes[0].legend(handles=line_handles, frameon=False, loc="lower right")
-    axes[0].add_artist(leg1)
-    axes[0].legend(handles=seed_handles, frameon=False, loc="lower left")
+    legend = axes[1].legend(
+        handles=dropout_handles,
+        title="Dropout",
+        frameon=False,
+        loc="lower right",
+        handlelength=1.8,
+        borderaxespad=0.35,
+        labelspacing=0.45,
+    )
+    legend._legend_box.align = "left"
+    axes[0].legend(
+        handles=seed_handles,
+        frameon=False,
+        loc="lower left",
+        borderaxespad=0.35,
+        labelspacing=0.35,
+    )
 
     fig.tight_layout(pad=0.45, w_pad=1.0)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    out_path = OUT_DIR / "figA1.png"
+    out_path = OUT_DIR / "fig3.png"
     fig.savefig(out_path, dpi=350, bbox_inches="tight")
     plt.close(fig)
     return out_path
@@ -266,9 +238,7 @@ def main():
     records = load_sweep()
     print_summary(records)
     fig3 = make_main_figure(records)
-    figa1 = make_seed_figure(records)
     print(f"\nSaved {fig3}")
-    print(f"Saved {figa1}")
 
 
 if __name__ == "__main__":
