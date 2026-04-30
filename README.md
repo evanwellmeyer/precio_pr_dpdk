@@ -35,12 +35,6 @@ This repo currently contains three related tracks:
 | `train_pr_dpdk_cv.py` | Leave-one-PPE-out training over `GA7`, `GA8`, `GA9` |
 | `post_pr_dpdk_cv.py` | Matched CV evaluation on the held-out PPE |
 
-### Utilities
-
-| File | Role |
-|------|------|
-| `make_cesm2_dpdK.py` | Build `CESM2_dPdK_rg128.nc` from CESM2 SST4K precipitation and historical/dT fields |
-
 ### Notebooks
 
 | File | Role | Current state |
@@ -119,7 +113,6 @@ The scripts assume a local workstation layout:
 
 ```text
 /Users/ewellmeyer/Documents/research/HadGEM
-/Users/ewellmeyer/Documents/research/CESM2
 /Users/ewellmeyer/Documents/research/weights
 ```
 
@@ -131,18 +124,6 @@ Depending on the script, the code expects some combination of:
 - `GA789_dPdK_rg128.nc`
 - `GA789_dPdP_rg128.nc`
 - `hadgem_landmask_rg128.nc`
-
-### CESM2 files used by the utility
-
-`make_cesm2_dpdK.py` expects:
-
-- future SST4K precipitation files under `CESM2/SST4K/PR/`
-- `CESM2_PR_his_rg128.nc`
-- `CESM2_dT_rg128.nc`
-
-and writes:
-
-- `CESM2_dPdK_rg128.nc`
 
 ---
 
@@ -455,30 +436,6 @@ they are not the most actively maintained entry points in the repo.
 
 ---
 
-## CESM2 Utility
-
-Run:
-
-```bash
-python make_cesm2_dpdK.py
-```
-
-What it does:
-
-1. loads CESM2 SST4K future precipitation files
-2. time-means each file
-3. converts native units to `mm/yr`
-4. regrids to the HadGEM `rg128` grid with `xesmf`
-5. computes `dPR = future - historical`
-6. computes area-weighted global mean warming from `CESM2_dT_rg128.nc`
-7. forms `dPdK = dPR / global_dT`
-8. saves `CESM2_dPdK_rg128.nc`
-
-This is separate from the HadGEM training loop, but useful for producing a
-consistent out-of-sample `dPdK` dataset.
-
----
-
 ## Recommended Usage
 
 ### If you want to train a fresh standard HadGEM `dPdK` ensemble
@@ -585,7 +542,7 @@ Core packages used across the repo include:
 - `torch`
 - `netcdf4`
 - `cartopy`
-- `xesmf` for `make_cesm2_dpdK.py`
+- `xesmf` for regridding
 
 On Apple Silicon, the scripts are written to use `mps` when available.
 `train_pr_dpdk.py` keeps AMP off by default for numerical stability.
