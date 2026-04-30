@@ -38,10 +38,10 @@ k_size = 3
 pdrop = 0.1
 num_bins = 64
 sigma_scale = 0.6
-batch_train = 40
-batch_val = 40
+batch_train = 8
+batch_val = 8
 num_epochs = 5000
-patience = 20
+patience = 25
 grad_clip = 1.0
 
 dP_min = -700    # -700 dpdk ; -10 dpdp
@@ -187,7 +187,7 @@ for member in range(0, ensemble_size):
 
     model = ProbUNet(1, base_ch, k_size, pdrop, num_bins, gn_groups=gn_groups).to(device)
     opt = optim.RAdam(model.parameters(), lr=1e-3)
-    sch = ReduceLROnPlateau(opt, mode="min", factor=0.5, patience=10)
+    sch = ReduceLROnPlateau(opt, mode="min", factor=0.5, patience=15)
 
     best_val = float("inf")
     if os.path.exists(best_path):
