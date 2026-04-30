@@ -224,10 +224,10 @@ k_size        = 3
 pdrop         = 0.1
 num_bins      = 64
 sigma_scale   = 0.6
-batch_train   = 40
-batch_val     = 40
+batch_train   = 8
+batch_val     = 8
 num_epochs    = 5000
-patience      = 20
+patience      = 25
 grad_clip     = 1.0
 optimizer     = RAdam(lr=1e-3)
 target range  = [-700, 1200]
